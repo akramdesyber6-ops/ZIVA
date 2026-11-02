@@ -1,4 +1,4 @@
-# JUSTWATCH — Cinema Discovery
+# ZIVA — Light up your screen
 
 A responsive dark-themed cinema discovery website built with **HTML, CSS and vanilla JavaScript**. This is a clean-room recreation inspired by the reference website supplied by the project owner. It is not the original site's source code and is not affiliated with any streaming provider.
 
