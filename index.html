@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080b12">
+  <meta name="description" content="Discover movies and series, explore popular titles and build your watchlist.">
+  <title>JUSTWATCH — Cinema Discovery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="JUSTWATCH home">JUST<span>WATCH</span></a>
+    <nav class="nav" id="navigation" aria-label="Main navigation">
+      <a class="active" href="#discover">Discover</a><a href="#movies">Movies</a><a href="#series">Series</a><a href="#genres">Genres</a><a href="#watchlist">My list <span id="watchlist-count" class="count">0</span></a>
+    </nav>
+    <div class="top-actions"><button class="icon-button" id="search-toggle" aria-label="Open search">⌕</button><button class="sign-in" id="sign-in">Sign in</button><button class="menu-button" id="menu-toggle" aria-label="Toggle navigation">☰</button></div>
+  </header>
+  <section class="search-strip" id="search-strip"><label class="search-box"><span>⌕</span><input id="search-input" type="search" placeholder="Search movies, shows or genres..." autocomplete="off"><kbd>ESC</kbd></label></section>
+  <main>
+    <section class="hero" id="discover"><div class="hero-image" aria-hidden="true"></div><div class="hero-shade"></div><div class="hero-content">
+      <div class="eyebrow"><span class="live-dot"></span> YOUR CINEMA, YOUR WAY</div><p class="overline">FEATURED COLLECTION</p><h1>Stories worth<br><em>staying up</em> for.</h1>
+      <p class="hero-copy">Find your next favourite. Explore the titles everyone's talking about, uncover hidden gems, and make every movie night count.</p>
+      <div class="hero-meta"><span class="star">★</span> 8.9 <span class="meta-divider"></span> 2026 <span class="meta-divider"></span> Adventure · Drama <span class="quality">4K</span></div>
+      <div class="hero-buttons"><button class="primary-button" id="featured-button">Explore featured <span>→</span></button><a class="ghost-button" href="#movies">Browse titles</a></div>
+    </div><div class="hero-index"><span>01</span><i></i><span>04</span></div></section>
+    <section class="content-section" id="movies"><div class="section-heading"><div><p class="section-kicker">WHAT'S HOT</p><h2>Trending this week</h2><p class="section-subtitle">The titles people can't stop watching.</p></div><a class="text-link" href="#movies">Explore all <span>↗</span></a></div>
+      <div class="genre-row" id="genres" aria-label="Filter by genre"><button class="genre-chip selected" data-genre="All">All titles</button><button class="genre-chip" data-genre="Action">Action</button><button class="genre-chip" data-genre="Drama">Drama</button><button class="genre-chip" data-genre="Sci-Fi">Sci-Fi</button><button class="genre-chip" data-genre="Thriller">Thriller</button><button class="genre-chip" data-genre="Animation">Animation</button><button class="genre-chip" data-genre="Comedy">Comedy</button></div>
+      <div class="movie-grid" id="trending-grid" aria-live="polite"></div>
+    </section>
+    <section class="promo"><div class="promo-mark">JW<span>+</span></div><div><p class="section-kicker">YOUR NEXT MOVIE NIGHT</p><h2>A good story is never far away.</h2><p>Explore collections, save favourites and keep your watchlist close.</p></div><a href="#watchlist" class="primary-button">Build your list <span>→</span></a></section>
+    <section class="content-section" id="series"><div class="section-heading"><div><p class="section-kicker">JUST FOR YOU</p><h2>More to discover</h2><p class="section-subtitle">A few more picks for your next screen time.</p></div><a class="text-link" href="#series">View collection <span>↗</span></a></div><div class="movie-grid" id="popular-grid"></div></section>
+    <section class="content-section watchlist-section" id="watchlist"><div class="section-heading"><div><p class="section-kicker">SAVED FOR LATER</p><h2>My watchlist</h2><p class="section-subtitle">Your personal collection, stored on this device.</p></div></div><div class="movie-grid" id="watchlist-grid"><p class="empty-state">Your list is empty. Add a title using the + button on any movie.</p></div></section>
+  </main>
+  <footer class="footer"><a class="brand" href="#">JUST<span>WATCH</span></a><p>Discover. Explore. Enjoy.</p><small>© 2026 JUSTWATCH · Independent cinema discovery demo</small></footer>
+  <dialog class="movie-dialog" id="movie-dialog"><button class="dialog-close" id="dialog-close" aria-label="Close details">×</button><div class="dialog-art" id="dialog-art"></div><div class="dialog-content"><p class="section-kicker" id="dialog-genre">FEATURED TITLE</p><h2 id="dialog-title">Movie title</h2><div class="dialog-meta" id="dialog-meta"></div><p id="dialog-description"></p><div class="dialog-actions"><button class="primary-button" id="dialog-watch">Watch options <span>→</span></button><button class="ghost-button" id="dialog-save">＋ Add to my list</button></div><p class="fine-print">Demo interface: connect a licensed streaming provider or your own media catalogue to enable playback.</p></div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
