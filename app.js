@@ -14,13 +14,30 @@ const movieData = [
 ];
 
 const $ = selector => document.querySelector(selector);
-const watchlistKey = "justwatch-demo-watchlist";
+const watchlistKey = "ziva-watchlist";
+const legacyWatchlistKey = "justwatch-demo-watchlist";
 let activeGenre = "All", searchTerm = "", currentMovie = null;
 let watchlist = loadWatchlist();
 
 function loadWatchlist() {
-  try { const saved = JSON.parse(localStorage.getItem(watchlistKey) || "[]"); return Array.isArray(saved) ? saved.filter(id => movieData.some(movie => movie.id === id)) : []; }
-  catch { return []; }
+  try {
+    const currentSaved = localStorage.getItem(watchlistKey);
+    const legacySaved = currentSaved === null
+      ? localStorage.getItem(legacyWatchlistKey)
+      : null;
+
+    const saved = JSON.parse(currentSaved ?? legacySaved ?? "[]");
+
+    if (currentSaved === null && legacySaved !== null) {
+      localStorage.setItem(watchlistKey, legacySaved);
+    }
+
+    return Array.isArray(saved)
+      ? saved.filter(id => movieData.some(movie => movie.id === id))
+      : [];
+  } catch {
+    return [];
+  }
 }
 function saveWatchlist() {
   try { localStorage.setItem(watchlistKey, JSON.stringify(watchlist)); }

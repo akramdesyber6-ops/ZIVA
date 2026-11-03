@@ -25,7 +25,7 @@ Then visit `http://localhost:5500`.
 ## Project structure
 
 ```text
-justwatch/
+ZIVA/
 ├── index.html
 ├── styles.css
 ├── app.js
