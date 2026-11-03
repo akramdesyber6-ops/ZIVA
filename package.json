@@ -8,7 +8,13 @@
     "dev": "node --watch server.js",
     "test": "node --test"
   },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.4"
+  },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0"
   }
 }

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#121213">
+    <title>ZIVA Admin</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <div class="brand-lockup">
+          <span class="brand-mark">ZI</span>
+          <div>
+            <p class="eyebrow">ADMIN</p>
+            <h1>ZIVA</h1>
+          </div>
+        </div>
+
+        <nav class="admin-nav" aria-label="Admin navigation">
+          <a class="active" href="#overview">Overview</a>
+          <a href="#users">Users</a>
+          <a href="#content">Content</a>
+          <a href="#providers">Providers</a>
+          <a href="#access">Access</a>
+        </nav>
+      </aside>
+
+      <main class="admin-main">
+        <header class="admin-header">
+          <div>
+            <p class="eyebrow">SECURE CONTROL CENTER</p>
+            <h2>Operations dashboard</h2>
+          </div>
+          <a class="public-link" href="/">Back to public site</a>
+        </header>
+
+        <section class="admin-status" id="admin-status">
+          <div class="status-card">
+            <p class="status-label">Authentication</p>
+            <h3 id="auth-state">Checking session…</h3>
+          </div>
+          <div class="status-card">
+            <p class="status-label">Role</p>
+            <h3 id="role-state">Preparing RBAC checks…</h3>
+          </div>
+          <div class="status-card">
+            <p class="status-label">Access policy</p>
+            <h3>Admin-only</h3>
+          </div>
+        </section>
+
+        <section class="panel" id="overview">
+          <div class="panel-heading">
+            <h3>Phase 1 control plane</h3>
+          </div>
+          <ul class="feature-list">
+            <li>Supabase Auth session validation</li>
+            <li>RLS-based profile and roles model</li>
+            <li>Admin-only permission gate</li>
+            <li>Protected playback authorization checks</li>
+          </ul>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,209 @@
+[1mdiff --git a/app.js b/app.js[m
+[1mindex 4d7b956..8731956 100644[m
+[1m--- a/app.js[m
+[1m+++ b/app.js[m
+[36m@@ -1,116 +1,559 @@[m
+[31m-const movieData = [[m
+[31m-  {id:"horizon",title:"The Last Horizon",year:2026,genre:"Sci-Fi",rating:"8.9",type:"Movie",description:"A crew on a distant mission discovers a mysterious signal that challenges everything humanity believes about its place in the universe.",image:"https://images.unsplash.com/photo-1462331940025-496dfbfc7564?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"protocol",title:"Shadow Protocol",year:2025,genre:"Action",rating:"8.2",type:"Movie",description:"An elite operative is pulled into a high-stakes conspiracy where every ally seems to have a secret.",image:"https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"deep",title:"Beyond the Deep",year:2026,genre:"Drama",rating:"8.5",type:"Movie",description:"A moving story of courage, family and second chances set against the vastness of the ocean.",image:"https://images.unsplash.com/photo-1518837695005-2083093ee35b?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"neon",title:"Neon City",year:2025,genre:"Thriller",rating:"7.9",type:"Series",description:"In a city that never sleeps, one detective follows a trail of clues into a dangerous underworld.",image:"https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"kingdom",title:"Kingdom of Ash",year:2026,genre:"Action",rating:"8.7",type:"Movie",description:"A forgotten heir must unite rival kingdoms before an ancient threat rises again.",image:"https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"little",title:"Little Big World",year:2025,genre:"Animation",rating:"8.4",type:"Movie",description:"An unlikely friendship takes two tiny adventurers on the biggest journey of their lives.",image:"https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"silent",title:"The Silent Hour",year:2024,genre:"Thriller",rating:"7.8",type:"Movie",description:"A witness and a detective race against time when a quiet night turns into a mystery.",image:"https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"summer",title:"Summer Again",year:2025,genre:"Comedy",rating:"7.6",type:"Series",description:"One unexpected summer brings old friends together and changes the plans they thought they had.",image:"https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"storm",title:"After the Storm",year:2026,genre:"Drama",rating:"8.1",type:"Movie",description:"A family rebuilds its life and discovers that hope can arrive from the most unexpected places.",image:"https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"velocity",title:"Velocity",year:2025,genre:"Action",rating:"8.0",type:"Movie",description:"A street racer gets one final chance to settle a score and protect the people he loves.",image:"https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"parallel",title:"Parallel",year:2024,genre:"Sci-Fi",rating:"8.3",type:"Series",description:"Two strangers in different realities discover that their lives are connected by one impossible choice.",image:"https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=700&q=85"},[m
+[31m-  {id:"wild",title:"Wild Hearts",year:2025,genre:"Animation",rating:"8.6",type:"Movie",description:"A young explorer sets out to protect a magical forest and the creatures who call it home.",image:"https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=700&q=85"}[m
+[32m+[m
+[32m+[m[32m'use strict';[m
+[32m+[m
+[32m+[m[32m// ZIVA Stage 2B: live TMDB catalogue with a demo fallback.[m
+[32m+[m[32mconst demoMovies = [[m
+[32m+[m[32m  {id:'horizon',title:'The Last Horizon',year:2026,genre:'Sci-Fi',rating:'8.9',type:'Movie',description:'A crew on a distant mission discovers a mysterious signal that challenges everything humanity believes about its place in the universe.',image:'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'protocol',title:'Shadow Protocol',year:2025,genre:'Action',rating:'8.2',type:'Movie',description:'An elite operative is pulled into a high-stakes conspiracy where every ally seems to have a secret.',image:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'deep',title:'Beyond the Deep',year:2026,genre:'Drama',rating:'8.5',type:'Movie',description:'A moving story of courage, family and second chances set against the vastness of the ocean.',image:'https://images.unsplash.com/photo-1518837695005-2083093ee35b?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'neon',title:'Neon City',year:2025,genre:'Thriller',rating:'7.9',type:'Series',description:'In a city that never sleeps, one detective follows a trail of clues into a dangerous underworld.',image:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'kingdom',title:'Kingdom of Ash',year:2026,genre:'Action',rating:'8.7',type:'Movie',description:'A forgotten heir must unite rival kingdoms before an ancient threat rises again.',image:'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'little',title:'Little Big World',year:2025,genre:'Animation',rating:'8.4',type:'Movie',description:'An unlikely friendship takes two tiny adventurers on the biggest journey of their lives.',image:'https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'silent',title:'The Silent Hour',year:2024,genre:'Thriller',rating:'7.8',type:'Movie',description:'A witness and a detective race against time when a quiet night turns into a mystery.',image:'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'summer',title:'Summer Again',year:2025,genre:'Comedy',rating:'7.6',type:'Series',description:'One unexpected summer brings old friends together and changes the plans they thought they had.',image:'https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'storm',title:'After the Storm',year:2026,genre:'Drama',rating:'8.1',type:'Movie',description:'A family rebuilds its life and discovers that hope can arrive from the most unexpected places.',image:'https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'velocity',title:'Velocity',year:2025,genre:'Action',rating:'8.0',type:'Movie',description:'A street racer gets one final chance to settle a score and protect the people he loves.',image:'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'parallel',title:'Parallel',year:2024,genre:'Sci-Fi',rating:'8.3',type:'Series',description:'Two strangers in different realities discover that their lives are connected by one impossible choice.',image:'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=700&q=85'},[m
+[32m+[m[32m  {id:'wild',title:'Wild Hearts',year:2025,genre:'Animation',rating:'8.6',type:'Movie',description:'A young explorer sets out to protect a magical forest and the creatures who call it home.',image:'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=700&q=85'}[m
+ ];[m
+ [m
+[31m-const $ = selector => document.querySelector(selector);[m
+[31m-const watchlistKey = "ziva-watchlist";[m
+[31m-const legacyWatchlistKey = "justwatch-demo-watchlist";[m
+[31m-let activeGenre = "All", searchTerm = "", currentMovie = null;[m
+[32m+[m[32mconst $ = (selector) => document.querySelector(selector);[m
+[32m+[m[32mconst watchlistKey = 'ziva-watchlist';[m
+[32m+[m[32mconst legacyWatchlistKey = 'justwatch-demo-watchlist';[m
+[32m+[m
+[32m+[m[32mlet activeGenre = 'All';[m
+[32m+[m[32mlet searchTerm = '';[m
+[32m+[m[32mlet currentMovie = null;[m
+[32m+[m[32mlet catalogueMode = 'demo';[m
+[32m+[m[32mlet movieData = [...demoMovies];[m
+[32m+[m[32mlet seriesData = demoMovies.filter((item) => item.type === 'Series');[m
+[32m+[m[32mlet searchResults = null;[m
+[32m+[m[32mlet searchTimer = null;[m
+ let watchlist = loadWatchlist();[m
+ [m
+[32m+[m[32mconst knownMovies = new Map(demoMovies.map((movie) => [movie.id, movie]));[m
+[32m+[m
+ function loadWatchlist() {[m
+   try {[m
+[31m-    const currentSaved = localStorage.getItem(watchlistKey);[m
+[31m-    const legacySaved = currentSaved === null[m
+[31m-      ? localStorage.getItem(legacyWatchlistKey)[m
+[31m-      : null;[m
+[31m-[m
+[31m-    const saved = JSON.parse(currentSaved ?? legacySaved ?? "[]");[m
+[32m+[m[32m    const current = localStorage.getItem(watchlistKey);[m
+[32m+[m[32m    const legacy = current === null ? localStorage.getItem(legacyWatchlistKey) : null;[m
+[32m+[m[32m    const parsed = JSON.parse(current ?? legacy ?? '[]');[m
+ [m
+[31m-    if (currentSaved === null && legacySaved !== null) {[m
+[31m-      localStorage.setItem(watchlistKey, legacySaved);[m
+[32m+[m[32m    if (current === null && legacy !== null) {[m
+[32m+[m[32m      localStorage.setItem(watchlistKey, legacy);[m
+     }[m
+ [m
+[31m-    return Array.isArray(saved)[m
+[31m-      ? saved.filter(id => movieData.some(movie => movie.id === id))[m
+[32m+[m[32m    return Array.isArray(parsed)[m
+[32m+[m[32m      ? [...new Set(parsed.filter((id) => typeof id === 'string'))][m
+       : [];[m
+   } catch {[m
+     return [];[m
+   }[m
+ }[m
+[32m+[m
+ function saveWatchlist() {[m
+[31m-  try { localStorage.setItem(watchlistKey, JSON.stringify(watchlist)); }[m
+[31m-  catch { showToast("Browser storage is unavailable in this session."); }[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    localStorage.setItem(watchlistKey, JSON.stringify(watchlist));[m
+[32m+[m[32m  } catch {[m
+[32m+[m[32m    showToast('Browser storage is unavailable in this session.');[m
+[32m+[m[32m  }[m
+[32m+[m
+   updateWatchlistCount();[m
+ }[m
+[31m-function updateWatchlistCount() { $("#watchlist-count").textContent = watchlist.length; }[m
+[32m+[m
+[32m+[m[32mfunction updateWatchlistCount() {[m
+[32m+[m[32m  const node = $('#watchlist-count');[m
+[32m+[m[32m  if (node) node.textContent = String(watchlist.length);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction escapeHtml(value) {[m
+[32m+[m[32m  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({[m
+[32m+[m[32m    '&': '&amp;',[m
+[32m+[m[32m    '<': '&lt;',[m
+[32m+[m[32m    '>': '&gt;',[m
+[32m+[m[32m    '"': '&quot;',[m
+[32m+[m[32m    "'": '&#39;'[m
+[32m+[m[32m  }[ch]));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction safeImageUrl(value) {[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    const url = new URL(value, window.location.origin);[m
+[32m+[m[32m    return ['https:', 'http:'].includes(url.protocol) ? url.href : '';[m
+[32m+[m[32m  } catch {[m
+[32m+[m[32m    return '';[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+ function makeCard(movie) {[m
+   const saved = watchlist.includes(movie.id);[m
+[31m-  return `<article class="movie-card" data-movie-id="${movie.id}" tabindex="0" aria-label="View ${movie.title} details"><div class="poster"><img src="${movie.image}" alt="" loading="lazy" onerror="this.style.opacity='.15'"><span class="rating">★ ${movie.rating}</span><div class="card-actions"><button class="save-button ${saved ? "saved" : ""}" data-save="${movie.id}" aria-label="${saved ? "Remove from" : "Add to"} watchlist" title="${saved ? "Remove from" : "Add to"} my list">${saved ? "✓" : "+"}</button></div><span class="poster-label">${movie.type}</span></div><h3>${movie.title}</h3><small>${movie.year} &nbsp;·&nbsp; ${movie.genre}</small></article>`;[m
+[32m+[m
+[32m+[m[32m  return `[m
+[32m+[m[32m    <article class="movie-card"[m
+[32m+[m[32m      data-movie-id="${escapeHtml(movie.id)}"[m
+[32m+[m[32m      tabindex="0"[m
+[32m+[m[32m      aria-label="View ${escapeHtml(movie.title)} details">[m
+[32m+[m
+[32m+[m[32m      <div class="poster">[m
+[32m+[m[32m        <img[m
+[32m+[m[32m          src="${escapeHtml(safeImageUrl(movie.image))}"[m
+[32m+[m[32m          alt="${escapeHtml(movie.title)} poster"[m
+[32m+[m[32m          loading="lazy"[m
+[32m+[m[32m          onerror="this.style.opacity='.15'">[m
+[32m+[m
+[32m+[m[32m        <span class="rating">★ ${escapeHtml(movie.rating || '—')}</span>[m
+[32m+[m
+[32m+[m[32m        <div class="card-actions">[m
+[32m+[m[32m          <button[m
+[32m+[m[32m            class="save-button ${saved ? 'saved' : ''}"[m
+[32m+[m[32m            data-save="${escapeHtml(movie.id)}"[m
+[32m+[m[32m            aria-label="${saved ? 'Remove from' : 'Add to'} watchlist"[m
+[32m+[m[32m            title="${saved ? 'Remove from' : 'Add to'} my list">[m
+[32m+[m[32m            ${saved ? '✓' : '+'}[m
+[32m+[m[32m          </button>[m
+[32m+[m[32m        </div>[m
+[32m+[m
+[32m+[m[32m        <span class="poster-label">${escapeHtml(movie.type)}</span>[m
+[32m+[m[32m      </div>[m
+[32m+[m
+[32m+[m[32m      <h3>${escapeHtml(movie.title)}</h3>[m
+[32m+[m[32m      <small>[m
+[32m+[m[32m        ${escapeHtml(movie.year || 'Year unknown')}[m
+[32m+[m[32m        &nbsp;·&nbsp;[m
+[32m+[m[32m        ${escapeHtml(movie.genre || 'Unclassified')}[m
+[32m+[m[32m      </small>[m
+[32m+[m[32m    </article>[m
+[32m+[m[32m  `;[m
+ }[m
+[31m-function renderGrid(target, items, emptyMessage) {[m
+[31m-  const grid = $(target);[m
+[31m-  grid.innerHTML = items.length ? items.map(makeCard).join("") : `<p class="empty-state">${emptyMessage}</p>`;[m
+[32m+[m
+[32m+[m[32mfunction renderGrid(selector, items, emptyMessage) {[m
+[32m+[m[32m  const grid = $(selector);[m
+[32m+[m[32m  if (!grid) return;[m
+[32m+[m
+[32m+[m[32m  grid.innerHTML = items.length[m
+[32m+[m[32m    ? items.map(makeCard).join('')[m
+[32m+[m[32m    : `<p class="empty-state">${escapeHtml(emptyMessage)}</p>`;[m
+ }[m
+[31m-function filteredMovies() {[m
+[31m-  return movieData.filter(movie => (activeGenre === "All" || movie.genre === activeGenre) && `${movie.title} ${movie.genre} ${movie.year} ${movie.type}`.toLowerCase().includes(searchTerm));[m
+[32m+[m
+[32m+[m[32mfunction matchesFilters(movie) {[m
+[32m+[m[32m  const genreMatch =[m
+[32m+[m[32m    activeGenre === 'All' ||[m
+[32m+[m[32m    movie.genre === activeGenre ||[m
+[32m+[m[32m    (movie.genres || []).includes(activeGenre);[m
+[32m+[m
+[32m+[m[32m  const text = `[m
+[32m+[m[32m    ${movie.title}[m
+[32m+[m[32m    ${movie.genre}[m
+[32m+[m[32m    ${(movie.genres || []).join(' ')}[m
+[32m+[m[32m    ${movie.year}[m
+[32m+[m[32m    ${movie.type}[m
+[32m+[m[32m  `.toLowerCase();[m
+[32m+[m
+[32m+[m[32m  return genreMatch && text.includes(searchTerm);[m
+ }[m
+[32m+[m
+ function render() {[m
+[31m-  renderGrid("#trending-grid", filteredMovies().slice(0, 6), "No titles match that search. Try another keyword or genre.");[m
+[31m-  renderGrid("#popular-grid", movieData.slice(6), "More titles are coming soon.");[m
+[31m-  renderGrid("#watchlist-grid", watchlist.map(id => movieData.find(movie => movie.id === id)).filter(Boolean), "Your list is empty. Add a title using the + button on any movie.");[m
+[32m+[m[32m  const filtered = (searchResults || movieData).filter(matchesFilters);[m
+[32m+[m
+[32m+[m[32m  const filteredSeries = searchResults[m
+[32m+[m[32m    ? [][m
+[32m+[m[32m    : seriesData.filter(matchesFilters);[m
+[32m+[m
+[32m+[m[32m  renderGrid([m
+[32m+[m[32m    '#trending-grid',[m
+[32m+[m[32m    filtered.slice(0, 12),[m
+[32m+[m[32m    'No titles match that search. Try another keyword or ge
