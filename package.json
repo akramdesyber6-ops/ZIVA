@@ -1,0 +1,14 @@
+{
+  "name": "ziva-cinema",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ZIVA — Light Up Your Screen. Cinema discovery with optional TMDB metadata.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
