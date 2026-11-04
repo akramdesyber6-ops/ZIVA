@@ -29,8 +29,10 @@ create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, pg_catalog
 as $$
+declare
+  v_role_id uuid;
 begin
   insert into public.profiles (id, email, full_name)
   values (new.id, new.email, coalesce(new.raw_user_meta_data->>'full_name', ''))
@@ -38,6 +40,23 @@ begin
   set email = excluded.email,
       full_name = coalesce(excluded.full_name, public.profiles.full_name),
       updated_at = now();
+
+  select r.id into v_role_id
+  from public.roles r
+  where r.name = 'user';
+
+  if v_role_id is null then
+    insert into public.roles (name, description)
+    values ('user', 'Standard public user')
+    on conflict (name) do nothing
+    returning id into v_role_id;
+  end if;
+
+  if v_role_id is not null then
+    insert into public.user_roles (user_id, role_id)
+    values (new.id, v_role_id)
+    on conflict (user_id, role_id) do nothing;
+  end if;
 
   return new;
 end;
@@ -48,7 +67,7 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = public
+set search_path = public, pg_catalog
 as $$
   select exists (
     select 1
@@ -59,21 +78,8 @@ as $$
   );
 $$;
 
-create or replace function public.is_user_admin_by_id(p_user_id uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1
-    from public.user_roles ur
-    join public.roles r on r.id = ur.role_id
-    where ur.user_id = p_user_id
-      and r.name = 'admin'
-  );
-$$;
+revoke all on function public.is_user_admin() from public;
+grant execute on function public.is_user_admin() to authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.roles enable row level security;
@@ -100,13 +106,18 @@ on public.profiles
 for select
 using (public.is_user_admin());
 
+create policy "Admins can read roles"
+on public.roles
+for select
+using (public.is_user_admin());
+
 create policy "Admins can manage roles"
 on public.roles
 for all
 using (public.is_user_admin())
 with check (public.is_user_admin());
 
-create policy "Admins can manage user roles"
+create policy "Admins can manage role assignments"
 on public.user_roles
 for all
 using (public.is_user_admin())

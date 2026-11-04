@@ -9,12 +9,9 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.4"
+    "@supabase/supabase-js": "^2.118.0"
   },
   "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.118.0"
+    "node": ">=22"
   }
 }

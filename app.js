@@ -21,17 +21,52 @@ const $ = (selector) => document.querySelector(selector);
 const watchlistKey = 'ziva-watchlist';
 const legacyWatchlistKey = 'justwatch-demo-watchlist';
 
-let activeGenre = 'All';
 let searchTerm = '';
 let currentMovie = null;
-let catalogueMode = 'demo';
-let movieData = [...demoMovies];
-let seriesData = demoMovies.filter((item) => item.type === 'Series');
+let catalogueMode = 'unavailable';
 let searchResults = null;
 let searchTimer = null;
+let searchError = '';
 let watchlist = loadWatchlist();
+let authMode = 'login';
+let authStep = 'request';
+let loginMethod = 'password';
+let authUser = null;
+let csrfToken = '';
+let authEmail = '';
+let resendSeconds = 0;
+let resendTimer = null;
+let catalogueSections = [];
+let currentPage = 'home';
+let currentMediaType = 'movie';
+let currentGenreSlug = '';
+let currentGenreId = null;
+let selectedGenreId = '';
+let watchlistFilter = 'all';
+let searchPage = 1;
+let searchTotalPages = 1;
+let searchLoading = false;
+let catalogueGenres = [];
+let movieRequestId = 0;
 
-const knownMovies = new Map(demoMovies.map((movie) => [movie.id, movie]));
+const knownMovies = new Map();
+
+function getPageContext() {
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  const genreMatch = /^\/genres\/([a-z0-9-]+)$/.exec(pathname);
+  if (genreMatch) {
+    const params = new URLSearchParams(window.location.search);
+    return {
+      page: 'genre',
+      genreSlug: genreMatch[1],
+      mediaType: params.get('media') === 'tv' ? 'tv' : 'movie'
+    };
+  }
+  if (pathname === '/movies') return { page: 'movies', mediaType: 'movie' };
+  if (pathname === '/series') return { page: 'series', mediaType: 'tv' };
+  if (pathname === '/watchlist') return { page: 'watchlist', mediaType: 'movie' };
+  return { page: 'home', mediaType: 'movie' };
+}
 
 function loadWatchlist() {
   try {
@@ -77,6 +112,7 @@ function escapeHtml(value) {
 }
 
 function safeImageUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
   try {
     const url = new URL(value, window.location.origin);
     return ['https:', 'http:'].includes(url.protocol) ? url.href : '';
@@ -95,11 +131,9 @@ function makeCard(movie) {
       aria-label="View ${escapeHtml(movie.title)} details">
 
       <div class="poster">
-        <img
-          src="${escapeHtml(safeImageUrl(movie.image))}"
-          alt="${escapeHtml(movie.title)} poster"
-          loading="lazy"
-          onerror="this.style.opacity='.15'">
+        ${safeImageUrl(movie.image)
+          ? `<img src="${escapeHtml(safeImageUrl(movie.image))}" alt="${escapeHtml(movie.title)} poster" loading="lazy" onerror="this.style.opacity='.15'">`
+          : '<span class="poster-placeholder" aria-hidden="true"></span>'}
 
         <span class="rating">★ ${escapeHtml(movie.rating || '—')}</span>
 
@@ -136,11 +170,7 @@ function renderGrid(selector, items, emptyMessage) {
 }
 
 function matchesFilters(movie) {
-  const genreMatch =
-    activeGenre === 'All' ||
-    movie.genre === activeGenre ||
-    (movie.genres || []).includes(activeGenre);
-
+  if (selectedGenreId && !movie.genreIds?.includes(Number(selectedGenreId))) return false;
   const text = `
     ${movie.title}
     ${movie.genre}
@@ -149,37 +179,48 @@ function matchesFilters(movie) {
     ${movie.type}
   `.toLowerCase();
 
-  return genreMatch && text.includes(searchTerm);
+  return text.includes(searchTerm);
 }
 
 function render() {
-  const filtered = (searchResults || movieData).filter(matchesFilters);
+  const sections = catalogueSections;
+  const visible = sections.map((section) => ({ section, items: section.items }));
 
-  const filteredSeries = searchResults
-    ? []
-    : seriesData.filter(matchesFilters);
+  visible.forEach(({ section, items }, index) => {
+    const root = document.getElementById(`catalogue-${section.key}`);
+    if (!root) return;
+    if (section.heading) return;
+    root.hidden = false;
+    const title = root.querySelector('h2');
+    const grid = root.querySelector('.movie-grid');
+    const loadMore = root.querySelector('[data-load-section]');
+    if (searchResults !== null && index === 0) {
+      title.textContent = 'Search results';
+      grid.innerHTML = searchResults.length
+        ? searchResults.filter(matchesFilters).map(makeCard).join('')
+        : `<p class="empty-state">${escapeHtml(searchError || 'No titles match that search.')}</p>`;
+      loadMore.hidden = searchPage >= searchTotalPages || !searchResults.length;
+      loadMore.disabled = searchLoading;
+      loadMore.textContent = searchLoading ? 'Loading…' : 'Load more results';
+      return;
+    }
 
-  renderGrid(
-    '#trending-grid',
-    filtered.slice(0, 12),
-    'No titles match that search. Try another keyword or genre.'
-  );
-
-  renderGrid(
-    '#popular-grid',
-    searchResults
-      ? []
-      : (
-          filteredSeries.length
-            ? filteredSeries.slice(0, 12)
-            : (catalogueMode === 'demo' ? demoMovies.slice(6) : [])
-        ),
-    searchResults
-      ? 'Search results are shown above.'
-      : 'More titles are coming soon.'
-  );
+    title.textContent = section.title;
+    if (section.loading && !section.items.length) {
+      grid.innerHTML = '<div class="movie-skeleton"></div>'.repeat(6);
+    } else {
+      const filteredItems = items.filter(matchesFilters);
+      grid.innerHTML = filteredItems.length
+        ? filteredItems.map(makeCard).join('')
+        : `<p class="empty-state">${escapeHtml(section.error || (section.page ? 'No titles match the current search in this section.' : 'This section loads as you browse.'))}</p>`;
+    }
+    loadMore.hidden = section.page >= section.totalPages && !section.error;
+    loadMore.disabled = section.loading;
+    loadMore.textContent = section.loading ? 'Loading…' : section.error ? 'Retry' : 'Load more';
+  });
 
   const saved = watchlist
+    .filter((id) => watchlistFilter === 'all' || id.startsWith(`tmdb-${watchlistFilter}-`))
     .map((id) => knownMovies.get(id))
     .filter(Boolean);
 
@@ -194,6 +235,72 @@ function render() {
   );
 
   updateWatchlistCount();
+}
+
+function renderCatalogueShell(sections) {
+  const root = $('#catalogue-sections');
+  root.innerHTML = sections.map((section) => section.heading
+    ? `<section class="content-section catalogue-section genre-group-heading" id="catalogue-${escapeHtml(section.key)}"><h2>${escapeHtml(section.title)}</h2></section>`
+    : `
+    <section class="content-section catalogue-section" id="catalogue-${escapeHtml(section.key)}" data-section="${escapeHtml(section.key)}">
+      <div class="section-heading">
+        <div><p class="section-kicker">${currentPage === 'home' ? "WHAT'S HOT" : 'DISCOVER'}</p><h2>${escapeHtml(section.title)}</h2><p class="section-subtitle">Explore ${escapeHtml(section.title.toLowerCase())} from TMDB.</p></div>
+      </div>
+      <div class="movie-grid" aria-live="polite"></div>
+      <div class="section-pagination"><button class="ghost-button" type="button" data-load-section="${escapeHtml(section.key)}">Load more</button></div>
+    </section>
+  `).join('');
+  render();
+}
+
+async function loadSection(section, page = null) {
+  if (!section || section.loading) return;
+  const requestedPage = page || (section.error
+    ? Math.max(section.page, 1)
+    : section.page ? window.ZivaCatalogueSections.nextPage(section) : 1);
+  if (!requestedPage) return;
+  section.loading = true;
+  section.error = '';
+  render();
+
+  try {
+    const response = await window.ZivaCatalogue.get(section.path, {
+      ...section.params,
+      page: requestedPage
+    });
+    const results = window.ZivaCatalogue.normalizeList(response.results || [], section.mediaType);
+    section.items = window.ZivaCatalogue.unique(section.items.concat(results));
+    section.page = requestedPage;
+    section.totalPages = Math.min(Number(response.total_pages) || requestedPage, 500);
+    section.error = '';
+    rememberMovies(section.items);
+  } catch (error) {
+    section.error = error.message || 'This catalogue section is temporarily unavailable.';
+  } finally {
+    section.loading = false;
+    render();
+  }
+}
+
+function observeCatalogueSections() {
+  const remaining = catalogueSections.slice(4).filter((section) => !section.heading);
+  if (!('IntersectionObserver' in window)) {
+    remaining.forEach((section) => loadSection(section));
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      observer.unobserve(entry.target);
+      const section = catalogueSections.find((item) => item.key === entry.target.dataset.section);
+      if (section) loadSection(section);
+    }
+  }, { rootMargin: '500px 0px' });
+  remaining.forEach((section) => {
+    const element = document.getElementById(`catalogue-${section.key}`);
+    if (element) observer.observe(element);
+  });
 }
 
 function setCatalogueStatus(message, mode = catalogueMode) {
@@ -219,10 +326,287 @@ function showToast(message) {
   }, 2600);
 }
 
+function updateAuthUi(user) {
+  authUser = user;
+  const signIn = $('#sign-in');
+  const signOut = $('#sign-out');
+
+  if (user) {
+    const name = user.fullName || user.email || 'Account';
+    signIn.textContent = name;
+    signIn.setAttribute('aria-label', `Signed in as ${name}`);
+    signIn.title = `View account: ${user.email || name}`;
+    signOut.hidden = false;
+  } else {
+    signIn.textContent = 'Sign in';
+    signIn.setAttribute('aria-label', 'Sign in');
+    signIn.removeAttribute('title');
+    signOut.hidden = true;
+  }
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  authStep = 'request';
+  loginMethod = 'password';
+  const creating = authMode === 'register';
+  $('#auth-kicker').textContent = creating ? 'JOIN ZIVA' : 'WELCOME BACK';
+  $('#auth-title').textContent = creating ? 'Create your account' : 'Sign in';
+  $('#auth-description').textContent = creating
+    ? 'Create your account with a password, then verify your email with a six-digit code.'
+    : 'Sign in with your email and password, or choose email-code sign-in.';
+  $('#auth-name-field').hidden = !creating;
+  $('#auth-name').required = creating;
+  $('#auth-password-field').hidden = false;
+  $('#auth-password').required = true;
+  $('#auth-password').autocomplete = creating ? 'new-password' : 'current-password';
+  $('#auth-code-field').hidden = true;
+  $('#auth-code').required = false;
+  $('#auth-email').readOnly = false;
+  $('#auth-email').value = authEmail;
+  $('#auth-submit-label').textContent = creating ? 'Create account' : 'Sign in';
+  $('#auth-switch-copy').textContent = creating ? 'Already have an account?' : 'New to ZIVA?';
+  $('#auth-mode-toggle').textContent = creating ? 'Sign in' : 'Create an account';
+  $('#auth-switch').hidden = false;
+  $('#auth-resend').hidden = true;
+  $('#auth-method-toggle').hidden = creating;
+  $('#auth-method-toggle').textContent = 'Use a one-time email code instead';
+  $('#auth-message').textContent = '';
+  $('#auth-message').dataset.kind = '';
+  $('#auth-code').value = '';
+}
+
+function showCodeEntry() {
+  authStep = 'verify';
+  $('#auth-kicker').textContent = 'EMAIL VERIFICATION';
+  $('#auth-title').textContent = 'Check your email';
+  $('#auth-description').textContent = `Enter the one-time code sent to ${authEmail}.`;
+  $('#auth-name-field').hidden = true;
+  $('#auth-password-field').hidden = true;
+  $('#auth-email').value = authEmail;
+  $('#auth-email').readOnly = true;
+  $('#auth-code-field').hidden = false;
+  $('#auth-code').required = true;
+  $('#auth-code').value = '';
+  $('#auth-submit-label').textContent = 'Verify code';
+  $('#auth-switch').hidden = true;
+  $('#auth-method-toggle').hidden = true;
+  $('#auth-resend').hidden = false;
+  $('#auth-message').textContent = 'Codes are single-use and expire according to the Supabase Auth email OTP settings.';
+  $('#auth-message').dataset.kind = '';
+  $('#auth-code').focus();
+  startResendCountdown();
+}
+
+function startResendCountdown() {
+  clearInterval(resendTimer);
+  resendSeconds = 30;
+  const button = $('#auth-resend');
+  button.disabled = true;
+  const update = () => {
+    button.textContent = resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : 'Resend code';
+    button.disabled = resendSeconds > 0;
+    if (resendSeconds <= 0) clearInterval(resendTimer);
+    resendSeconds -= 1;
+  };
+  update();
+  resendTimer = setInterval(update, 1000);
+}
+
+function openAuthDialog(mode = 'login') {
+  setAuthMode(mode);
+  const dialog = $('#auth-dialog');
+  if (!dialog.open) dialog.showModal();
+  (mode === 'register' ? $('#auth-name') : $('#auth-email')).focus();
+}
+
+async function restoreAuthSession() {
+  try {
+    const response = await fetch('/api/auth/session', {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (payload.csrfToken) csrfToken = payload.csrfToken;
+    updateAuthUi(response.ok && payload.authenticated ? payload.user : null);
+  } catch {
+    updateAuthUi(null);
+  }
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  const message = $('#auth-message');
+  const email = authStep === 'verify' ? authEmail : $('#auth-email').value.trim().toLowerCase();
+  const fullName = $('#auth-name').value.trim();
+  const password = $('#auth-password').value;
+  message.dataset.kind = '';
+
+  if (authStep === 'request' && authMode === 'register' && (fullName.length < 2 || fullName.length > 80)) {
+    message.textContent = 'Enter a name between 2 and 80 characters.';
+    $('#auth-name').focus();
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    message.textContent = 'Enter a valid email address.';
+    $('#auth-email').focus();
+    return;
+  }
+  if (authStep === 'request' && (authMode === 'register' || loginMethod === 'password') &&
+      (password.length < 8 || password.length > 128)) {
+    message.textContent = authMode === 'register'
+      ? 'Choose a password with at least 8 characters.'
+      : 'Enter your password.';
+    $('#auth-password').focus();
+    return;
+  }
+  const code = $('#auth-code').value.trim();
+  if (authStep === 'verify' && !/^\d{6}$/.test(code)) {
+    message.textContent = 'Enter the six-digit code from your email.';
+    $('#auth-code').focus();
+    return;
+  }
+
+  const submitButton = $('#auth-submit');
+  submitButton.disabled = true;
+  submitButton.setAttribute('aria-busy', 'true');
+  $('#auth-submit-label').textContent = authStep === 'verify'
+    ? 'Verifying code…'
+    : authMode === 'register' ? 'Creating account…' : loginMethod === 'password' ? 'Signing in…' : 'Sending code…';
+
+  try {
+    if (!csrfToken) await restoreAuthSession();
+    if (!csrfToken) throw new Error('Unable to secure the request. Reload the page and try again.');
+
+    const requestCode = authStep === 'request' &&
+      (authMode === 'register' || loginMethod === 'code');
+    const passwordLogin = authStep === 'request' && authMode === 'login' && loginMethod === 'password';
+    const route = authStep === 'verify'
+      ? '/api/auth/verify'
+      : authMode === 'register'
+        ? '/api/auth/register'
+        : loginMethod === 'code' ? '/api/auth/login-code' : '/api/auth/login';
+    const response = await fetch(route, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      body: JSON.stringify(authStep === 'verify'
+        ? { email, code, type: authMode === 'register' ? 'signup' : 'email' }
+        : authMode === 'register'
+          ? { full_name: fullName, email, password }
+          : passwordLogin ? { email, password } : { email })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Authentication failed. Please try again.');
+
+    if (requestCode) {
+      authEmail = email;
+      showCodeEntry();
+      message.textContent = payload.message || 'If an account exists for this address, a code has been sent.';
+    } else if (payload.authenticated && payload.user) {
+      updateAuthUi(payload.user);
+      $('#auth-dialog').close();
+      $('#auth-form').reset();
+      showToast(`Welcome${payload.user.fullName ? `, ${payload.user.fullName}` : ' to ZIVA'}.`);
+    } else {
+      throw new Error('Email verification could not be completed. Request a new code and try again.');
+    }
+  } catch (error) {
+    message.textContent = error.message || 'Authentication failed. Please try again.';
+  } finally {
+    submitButton.disabled = false;
+    submitButton.removeAttribute('aria-busy');
+    if (authStep === 'request') {
+      $('#auth-submit-label').textContent = authMode === 'register' ? 'Create account' : loginMethod === 'password' ? 'Sign in' : 'Send sign-in code';
+    } else {
+      $('#auth-submit-label').textContent = 'Verify code';
+    }
+  }
+}
+
+async function resendAuthCode() {
+  if (resendSeconds > 0) return;
+  authStep = 'request';
+  $('#auth-email').value = authEmail;
+  $('#auth-email').readOnly = true;
+  $('#auth-name-field').hidden = true;
+  $('#auth-password-field').hidden = true;
+  $('#auth-code-field').hidden = true;
+  $('#auth-submit').disabled = true;
+  $('#auth-submit-label').textContent = 'Sending code…';
+  try {
+    if (!csrfToken) await restoreAuthSession();
+    const response = await fetch(authMode === 'register' ? '/api/auth/resend' : '/api/auth/login-code', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      body: JSON.stringify({ email: authEmail })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Unable to resend the code.');
+    $('#auth-code-field').hidden = false;
+    $('#auth-code').required = true;
+    authStep = 'verify';
+    $('#auth-message').textContent = payload.message || 'A new code has been sent if the account is eligible.';
+    $('#auth-message').dataset.kind = 'success';
+    startResendCountdown();
+  } catch (error) {
+    authStep = 'verify';
+    $('#auth-code-field').hidden = false;
+    $('#auth-code').required = true;
+    $('#auth-message').textContent = error.message || 'Unable to resend the code.';
+  } finally {
+    $('#auth-submit').disabled = false;
+    $('#auth-submit-label').textContent = 'Verify code';
+  }
+}
+
+async function signOut() {
+  const button = $('#sign-out');
+  button.disabled = true;
+  try {
+    if (!csrfToken) await restoreAuthSession();
+    const response = await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      body: '{}'
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Unable to sign out.');
+    updateAuthUi(null);
+    showToast('You have signed out.');
+  } catch (error) {
+    showToast(error.message || 'Unable to sign out. Please try again.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function openMovie(movie) {
   if (!movie) return;
 
   currentMovie = movie;
+  const requestId = ++movieRequestId;
+  const mediaType = movie.tmdbType || (movie.id.startsWith('tmdb-tv-') ? 'tv' : 'movie');
+  const tmdbId = movie.tmdbId || Number(String(movie.id).replace(/^tmdb-(movie|tv)-/, ''));
+  const url = new URL(window.location.href);
+  if (Number.isInteger(tmdbId) && tmdbId > 0) {
+    url.searchParams.set('movie', `tmdb-${mediaType}-${tmdbId}`);
+    history.pushState({ movieId: `tmdb-${mediaType}-${tmdbId}` }, '', url);
+  }
 
   const art = $('#dialog-art');
   const backdrop = safeImageUrl(movie.backdrop || movie.image);
@@ -245,8 +629,209 @@ function openMovie(movie) {
   $('#dialog-save').textContent = watchlist.includes(movie.id)
     ? '✓ In my list'
     : '＋ Add to my list';
+  $('#dialog-trailer').hidden = true;
+  $('#dialog-providers').textContent = 'Checking official streaming availability…';
+  $('#playback-status').textContent = 'Playback availability is checked when you choose Play.';
+  $('#dialog-play').disabled = false;
+  $('#dialog-play').textContent = 'Play title';
+  $('#dialog-download').hidden = true;
+  clearPlayer();
 
   $('#movie-dialog').showModal();
+  if (!Number.isInteger(tmdbId) || tmdbId < 1) {
+    $('#dialog-providers').textContent = 'Streaming availability is not available for this title.';
+    return;
+  }
+  loadMovieLinks(movie, tmdbId, mediaType, requestId);
+}
+
+async function loadMovieLinks(movie, tmdbId, mediaType, requestId) {
+  const region = (/^[a-z]{2}-([A-Z]{2})$/.exec(navigator.language || '') || [])[1] || 'US';
+  const providerPath = mediaType === 'tv' ? `tv/${tmdbId}/watch/providers` : `movie/${tmdbId}/watch/providers`;
+  const [detailResult, videosResult, providersResult] = await Promise.allSettled([
+    window.ZivaCatalogue.get(`${mediaType}/${tmdbId}`),
+    window.ZivaCatalogue.get(`${mediaType}/${tmdbId}/videos`),
+    window.ZivaCatalogue.get(providerPath)
+  ]);
+  if (requestId !== movieRequestId || !$('#movie-dialog').open) return;
+
+  if (detailResult.status === 'fulfilled') {
+    const detail = window.ZivaCatalogue.normalize(detailResult.value, 'movie');
+    if (detail) {
+      Object.assign(movie, detail);
+      $('#dialog-title').textContent = detail.title;
+      $('#dialog-description').textContent = detail.description;
+      $('#dialog-meta').textContent = `★ ${detail.rating} · ${detail.year || 'Release date unavailable'} · ${detail.voteCount.toLocaleString()} ratings`;
+      $('#dialog-genre').textContent = (detail.genres || [detail.genre]).join(' · ').toUpperCase();
+    }
+  }
+
+  if (videosResult.status === 'fulfilled') {
+    const trailer = (videosResult.value.results || []).find((video) =>
+      video.site === 'YouTube' && video.type === 'Trailer' && video.official && video.key
+    ) || (videosResult.value.results || []).find((video) =>
+      video.site === 'YouTube' && video.type === 'Trailer' && video.key
+    );
+    if (trailer) {
+      const link = $('#dialog-trailer');
+      link.href = `https://www.youtube.com/watch?v=${encodeURIComponent(trailer.key)}`;
+      link.textContent = `Watch ${trailer.official ? 'official ' : ''}trailer ↗`;
+      link.hidden = false;
+    }
+  }
+
+  const regionProviders = providersResult.status === 'fulfilled'
+    ? providersResult.value.results && providersResult.value.results[region]
+    : null;
+  const providerLink = regionProviders && regionProviders.link;
+  const providerNames = regionProviders
+    ? [...(regionProviders.flatrate || []), ...(regionProviders.free || []), ...(regionProviders.ads || []), ...(regionProviders.rent || []), ...(regionProviders.buy || [])]
+      .map((provider) => provider.provider_name)
+      .filter((name, index, list) => name && list.indexOf(name) === index)
+    : [];
+  const providerNode = $('#dialog-providers');
+  if (providersResult.status === 'rejected') {
+    providerNode.textContent = `Streaming availability could not be checked for ${region}. Try again later.`;
+    return;
+  }
+  if (providerLink && providerNames.length) {
+    const link = safeExternalUrl(providerLink);
+    if (link) {
+      providerNode.replaceChildren(
+        document.createTextNode(`Streaming options in ${region}: ${providerNames.join(', ')}. `)
+      );
+      const anchor = document.createElement('a');
+      anchor.href = link;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      anchor.textContent = 'View availability';
+      providerNode.append(anchor);
+      return;
+    }
+  }
+  providerNode.textContent = `Currently unavailable for streaming in ${region}.`;
+}
+
+let activeHlsPlayer = null;
+function clearPlayer() {
+  if (activeHlsPlayer) {
+    activeHlsPlayer.destroy();
+    activeHlsPlayer = null;
+  }
+  const video = $('#movie-player');
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  $('#video-frame').hidden = true;
+}
+
+async function requestMoviePlayback() {
+  if (!currentMovie) return;
+  const button = $('#dialog-play');
+  const status = $('#playback-status');
+  button.disabled = true;
+  button.textContent = 'Checking…';
+  status.textContent = 'Checking your account and provider availability…';
+  $('#dialog-download').hidden = true;
+
+  try {
+    const url = new URL('/api/playback/authorize', window.location.origin);
+    url.searchParams.set('tmdbId', String(currentMovie.tmdbId));
+    url.searchParams.set('mediaType', currentMovie.tmdbType || 'movie');
+    const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 401 || response.status === 403) {
+      status.textContent = 'Sign in with a verified account to check protected playback.';
+      openAuthDialog('login');
+      $('#auth-message').textContent = 'A verified account is required for playback. Sign in or use email-code sign-in.';
+      return;
+    }
+    if (!response.ok || !payload.authorized || !payload.stream) {
+      status.textContent = payload.message || 'This title is not currently available for playback.';
+      return;
+    }
+
+    const streamUrl = safeExternalUrl(payload.stream.url);
+    const streamType = payload.stream.type;
+    if (!streamUrl || !['application/vnd.apple.mpegurl', 'application/x-mpegURL', 'video/mp4'].includes(streamType)) {
+      status.textContent = 'The provider returned an unsupported playback source.';
+      return;
+    }
+    const video = $('#movie-player');
+    $('#video-frame').hidden = false;
+    if (streamType.toLowerCase().includes('mpegurl') && !video.canPlayType(streamType)) {
+      if (window.Hls && window.Hls.isSupported()) {
+        activeHlsPlayer = new window.Hls();
+        activeHlsPlayer.loadSource(streamUrl);
+        activeHlsPlayer.attachMedia(video);
+        activeHlsPlayer.on(window.Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) status.textContent = 'Playback failed. Please try again later.';
+        });
+      } else {
+        $('#video-frame').hidden = true;
+        status.textContent = 'HLS playback is not supported by this browser.';
+        return;
+      }
+    } else {
+      video.src = streamUrl;
+    }
+    status.textContent = 'Authorized stream ready. Playback begins when you press Play.';
+    video.play().catch(() => {
+      status.textContent = 'The stream is ready. Press Play to start playback.';
+    });
+
+    const download = payload.download;
+    if (download && download.allowed === true && safeExternalUrl(download.url)) {
+      const link = $('#dialog-download');
+      link.href = safeExternalUrl(download.url);
+      link.hidden = false;
+    }
+  } catch {
+    status.textContent = 'Playback could not be checked. Please try again.';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Play title';
+  }
+}
+
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+async function restoreSharedMovieLink() {
+  const movieId = new URL(window.location.href).searchParams.get('movie');
+  const match = /^tmdb-(movie|tv)-(\d+)$/.exec(movieId || '');
+  if (!match || !window.ZivaCatalogue) return;
+  try {
+    const response = await window.ZivaCatalogue.get(`${match[1]}/${match[2]}`);
+    const movie = window.ZivaCatalogue.normalize(response, match[1]);
+    if (movie) {
+      rememberMovies([movie]);
+      openMovie(movie);
+    }
+  } catch {
+    showToast('This shared movie page is temporarily unavailable.');
+  }
+}
+
+async function shareMovie() {
+  if (!currentMovie) return;
+  const url = new URL(window.location.href);
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: currentMovie.title, url: url.href });
+    } else {
+      await navigator.clipboard.writeText(url.href);
+      showToast('Movie link copied.');
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') showToast('Unable to share this movie link.');
+  }
 }
 
 function rememberMovies(items) {
@@ -273,15 +858,6 @@ function toggleWatchlist(id) {
       ? '✓ In my list'
       : '＋ Add to my list';
   }
-}
-
-function updateGenreButtons() {
-  document.querySelectorAll('.genre-chip').forEach((button) => {
-    button.classList.toggle(
-      'selected',
-      button.dataset.genre === activeGenre
-    );
-  });
 }
 
 async function restoreSavedTmdbTitles() {
@@ -312,47 +888,110 @@ async function restoreSavedTmdbTitles() {
   }));
 }
 
+const genreLabels = {
+  action: 'Action', comedy: 'Comedy', family: 'Family', adventure: 'Adventure',
+  animation: 'Animation', drama: 'Drama', horror: 'Horror', romance: 'Romance',
+  'sci-fi': 'Sci-Fi', thriller: 'Thriller', documentary: 'Documentary'
+};
+
+function configurePage() {
+  const context = getPageContext();
+  currentPage = context.page;
+  currentMediaType = context.mediaType;
+  currentGenreSlug = context.genreSlug || '';
+  selectedGenreId = '';
+  const home = currentPage === 'home';
+  const watchlistPage = currentPage === 'watchlist';
+  const genrePage = currentPage === 'genre';
+  const pageTitles = {
+    movies: ['Movies', 'Explore movies, ratings, release dates and more.'],
+    series: ['Series', 'Explore television series and their latest details.'],
+    genre: [genreLabels[currentGenreSlug] || 'Genre', 'Browse this genre as movies or series.'],
+    watchlist: ['My Watchlist', 'Your saved movies and series on this device.']
+  };
+  $('.hero').hidden = !home;
+  $('.promo').hidden = !home;
+  $('#watchlist').hidden = !watchlistPage;
+  $('#catalogue-sections').hidden = watchlistPage;
+  $('#page-heading').hidden = home || watchlistPage;
+  $('#catalogue-controls').hidden = !(currentPage === 'movies' || currentPage === 'series' || genrePage);
+  $('#genre-filter-wrap').hidden = genrePage;
+  $('#media-switch').hidden = !genrePage;
+  if (!home && !watchlistPage) {
+    $('#page-title').textContent = pageTitles[currentPage][0];
+    $('#page-description').textContent = pageTitles[currentPage][1];
+  }
+  if (watchlistPage) {
+    $('#page-heading').hidden = false;
+    $('#page-title').textContent = pageTitles.watchlist[0];
+    $('#page-description').textContent = pageTitles.watchlist[1];
+    $('#watchlist').hidden = false;
+  }
+  for (const link of $('#navigation').querySelectorAll('a[href]')) {
+    const active = link.pathname === window.location.pathname;
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+  $('#media-switch').querySelectorAll('[data-media-type]').forEach((button) => {
+    const active = button.dataset.mediaType === currentMediaType;
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function setGenreOptions(genres) {
+  const select = $('#genre-filter');
+  select.replaceChildren(new Option('All genres', ''));
+  for (const genre of genres) {
+    select.add(new Option(genre.name, String(genre.id)));
+  }
+  select.value = selectedGenreId;
+}
+
 async function loadLiveCatalogue() {
   if (!window.ZivaCatalogue) {
     throw new Error('ZIVA catalogue client did not load.');
   }
 
-  const [movieResponse, tvResponse] = await Promise.all([
-    window.ZivaCatalogue.get('trending/movie/week'),
-    window.ZivaCatalogue.get('trending/tv/week')
-  ]);
-
-  const movies = window.ZivaCatalogue.normalizeList(
-    movieResponse.results || []
-  );
-
-  const series = window.ZivaCatalogue.normalizeList(
-    tvResponse.results || []
-  );
-
-  if (!movies.length && !series.length) {
-    throw new Error('TMDB returned no titles.');
+  const genresResponse = await window.ZivaCatalogue.get(`genre/${currentMediaType}/list`);
+  catalogueGenres = genresResponse.genres || [];
+  window.ZivaCatalogue.setGenres(catalogueGenres);
+  setGenreOptions(catalogueGenres);
+  if (currentPage === 'genre') {
+    currentGenreId = window.ZivaCatalogueSections.resolveGenreId(currentGenreSlug, currentMediaType, catalogueGenres);
+    selectedGenreId = currentGenreId ? String(currentGenreId) : '';
+  } else {
+    selectedGenreId = $('#genre-filter').value;
+    currentGenreId = selectedGenreId ? Number(selectedGenreId) : null;
   }
-
-  movieData = movies;
-  seriesData = series;
-
-  rememberMovies([...movies, ...series]);
-
+  catalogueSections = [window.ZivaCatalogueSections.createPageSection({
+    page: currentPage === 'home' ? 'home' : currentPage === 'genre' ? 'genre' : currentPage,
+    mediaType: currentMediaType,
+    genreId: currentGenreId
+  })];
+  if (currentPage === 'genre') catalogueSections[0].title = pageTitlesForGenre(currentGenreSlug);
+  renderCatalogueShell(catalogueSections);
   catalogueMode = 'live';
 
   $('#tmdb-attribution').hidden = false;
-
-  setCatalogueStatus(
-    `Showing trending movies and series from TMDB · ${movies.length + series.length} titles`,
-    'live'
-  );
-
+  if (currentPage === 'genre' && !currentGenreId) {
+    catalogueSections[0].error = `TMDB has no matching ${currentMediaType === 'tv' ? 'series' : 'movie'} genre for ${pageTitlesForGenre(currentGenreSlug)}.`;
+    render();
+    setCatalogueStatus(catalogueSections[0].error, 'error');
+  } else {
+    setCatalogueStatus(`Showing live ${currentMediaType === 'tv' ? 'series' : 'movie'} metadata from TMDB.`, 'live');
+    await loadSection(catalogueSections[0], 1);
+  }
   await restoreSavedTmdbTitles();
   render();
+  await restoreSharedMovieLink();
 }
 
-async function runSearch(query) {
+function pageTitlesForGenre(slug) {
+  return genreLabels[slug] || 'Genre';
+}
+
+async function runSearch(query, page = 1) {
   if (!query) {
     searchResults = null;
     render();
@@ -365,38 +1004,47 @@ async function runSearch(query) {
     return;
   }
 
-  setCatalogueStatus(
-    `Searching TMDB for “${query}”…`,
-    'live'
-  );
+  searchLoading = true;
+  searchError = '';
+  render();
+  setCatalogueStatus(`Searching TMDB for “${query}”…`, 'live');
 
   try {
-    const results = await window.ZivaCatalogue.search(query);
+    const response = await window.ZivaCatalogue.search(query, page, currentMediaType);
 
     if ($('#search-input').value.trim() !== query) return;
 
-    searchResults = results;
-    rememberMovies(results);
+    searchResults = page === 1
+      ? response.items
+      : window.ZivaCatalogue.unique((searchResults || []).concat(response.items));
+    searchPage = response.page;
+    searchTotalPages = response.totalPages;
+    rememberMovies(response.items);
 
     setCatalogueStatus(
-      `${results.length} search results from TMDB`,
+      `${searchResults.length} search results from TMDB`,
       'live'
     );
-
-    render();
   } catch {
-    searchResults = null;
-
-    setCatalogueStatus(
-      'TMDB search is temporarily unavailable. Showing local catalogue results.',
-      'demo'
-    );
-
+    searchError = 'TMDB search is temporarily unavailable. Try again shortly.';
+    if (page === 1) searchResults = [];
+    setCatalogueStatus(searchError, 'error');
+  } finally {
+    searchLoading = false;
     render();
   }
 }
 
+async function loadMoreSearch() {
+  const query = $('#search-input').value.trim();
+  if (query && searchPage < searchTotalPages && !searchLoading) {
+    await runSearch(query, searchPage + 1);
+  }
+}
+
 async function initializeCatalogue() {
+  configurePage();
+  render();
   try {
     const response = await fetch('/api/status', {
       headers: { Accept: 'application/json' }
@@ -409,32 +1057,25 @@ async function initializeCatalogue() {
     const status = await response.json();
 
     if (!status.tmdbConfigured) {
-      catalogueMode = 'demo';
+      catalogueMode = 'unavailable';
+      setCatalogueStatus('The live TMDB catalogue is unavailable. Configure TMDB_API_READ_ACCESS_TOKEN on the server.', 'error');
+      return;
+    }
 
-      setCatalogueStatus(
-        'Demo catalogue · Add a TMDB access token to enable live movies and series.',
-        'demo'
-      );
-
+    if (currentPage === 'watchlist') {
+      catalogueMode = 'live';
+      $('#tmdb-attribution').hidden = false;
+      setCatalogueStatus('Your saved titles are stored on this device.', 'live');
+      await restoreSavedTmdbTitles();
       render();
       return;
     }
 
     await loadLiveCatalogue();
 
-  } catch {
-    catalogueMode = 'demo';
-    movieData = [...demoMovies];
-    seriesData = demoMovies.filter((item) => item.type === 'Series');
-
-    rememberMovies(demoMovies);
-
-    setCatalogueStatus(
-      'Demo catalogue · Live movie data is currently unavailable.',
-      'demo'
-    );
-
-    render();
+  } catch (error) {
+    catalogueMode = 'unavailable';
+    setCatalogueStatus(error.message || 'The live movie catalogue is temporarily unavailable.', 'error');
   }
 }
 
@@ -465,16 +1106,21 @@ document.addEventListener('keydown', (event) => {
 
   if (event.key === 'Escape') {
     $('#search-strip').classList.remove('open');
+    if ($('#auth-dialog').open) $('#auth-dialog').close();
   }
 });
 
-$('#genres').addEventListener('click', (event) => {
-  const chip = event.target.closest('[data-genre]');
-  if (!chip) return;
-
-  activeGenre = chip.dataset.genre;
-  updateGenreButtons();
-  render();
+document.addEventListener('click', (event) => {
+  const sectionButton = event.target.closest('[data-load-section]');
+  if (sectionButton) {
+    const section = catalogueSections.find((item) => item.key === sectionButton.dataset.loadSection);
+    if (searchResults !== null && section && section.key === 'trending') loadMoreSearch();
+    else if (section) loadSection(section);
+    return;
+  }
+  if (event.target.closest('#catalogue-trending [data-load-section]') && searchResults !== null) {
+    loadMoreSearch();
+  }
 });
 
 $('#search-toggle').addEventListener('click', () => {
@@ -498,8 +1144,8 @@ $('#search-input').addEventListener('input', (event) => {
   if (!query) {
     setCatalogueStatus(
       catalogueMode === 'live'
-        ? 'Showing trending movies and series from TMDB.'
-        : 'Demo catalogue.',
+        ? `Showing live TMDB ${currentMediaType === 'tv' ? 'series' : 'movie'} metadata.`
+        : 'Live catalogue is not configured.',
       catalogueMode
     );
 
@@ -521,6 +1167,53 @@ $('#navigation').addEventListener('click', (event) => {
   }
 });
 
+$('#genre-filter').addEventListener('change', async (event) => {
+  selectedGenreId = event.target.value;
+  currentGenreId = selectedGenreId ? Number(selectedGenreId) : null;
+  searchResults = null;
+  searchError = '';
+  searchPage = 1;
+  if ($('#search-input').value.trim()) {
+    await runSearch($('#search-input').value.trim());
+    return;
+  }
+  catalogueSections = [window.ZivaCatalogueSections.createPageSection({
+    page: currentPage,
+    mediaType: currentMediaType,
+    genreId: currentGenreId
+  })];
+  if (currentPage === 'home') catalogueSections[0].path = 'trending/movie/week';
+  renderCatalogueShell(catalogueSections);
+  setCatalogueStatus(`Loading ${currentMediaType === 'tv' ? 'series' : 'movies'}…`, 'live');
+  await loadSection(catalogueSections[0], 1);
+});
+
+$('#media-switch').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-media-type]');
+  if (!button || button.dataset.mediaType === currentMediaType) return;
+  currentMediaType = button.dataset.mediaType;
+  const url = new URL(window.location.href);
+  url.searchParams.set('media', currentMediaType);
+  url.searchParams.delete('movie');
+  history.pushState({}, '', url);
+  $('#media-switch').querySelectorAll('[data-media-type]').forEach((item) => {
+    item.setAttribute('aria-pressed', String(item.dataset.mediaType === currentMediaType));
+  });
+  searchResults = null;
+  searchPage = 1;
+  await loadLiveCatalogue();
+});
+
+$('.watchlist-filter').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-watchlist-type]');
+  if (!button) return;
+  watchlistFilter = button.dataset.watchlistType;
+  $('.watchlist-filter').querySelectorAll('[data-watchlist-type]').forEach((item) => {
+    item.setAttribute('aria-pressed', String(item === button));
+  });
+  render();
+});
+
 $('#dialog-close').addEventListener('click', () => {
   $('#movie-dialog').close();
 });
@@ -530,6 +1223,7 @@ $('#movie-dialog').addEventListener('click', (event) => {
     $('#movie-dialog').close();
   }
 });
+$('#movie-dialog').addEventListener('close', clearPlayer);
 
 $('#dialog-save').addEventListener('click', () => {
   if (currentMovie) {
@@ -537,23 +1231,89 @@ $('#dialog-save').addEventListener('click', () => {
   }
 });
 
-$('#dialog-watch').addEventListener('click', () => {
-  showToast(
-    'Connect a licensed streaming provider to add real watch options.'
-  );
-});
+$('#dialog-share').addEventListener('click', shareMovie);
+$('#dialog-play').addEventListener('click', requestMoviePlayback);
 
 $('#featured-button').addEventListener('click', () => {
-  openMovie(movieData[0] || demoMovies[0]);
+  const trending = catalogueSections.find((section) => section.key === 'trending');
+  if (trending && trending.items.length) openMovie(trending.items[0]);
+  else showToast('Featured movies are not available right now.');
 });
 
 $('#sign-in').addEventListener('click', () => {
-  showToast(
-    'Sign-in is a demo action. Add an authentication provider to enable accounts.'
-  );
+  if (authUser) {
+    $('#profile-name').textContent = authUser.fullName || 'ZIVA member';
+    $('#profile-email').textContent = authUser.email || '';
+    $('#profile-dialog').showModal();
+  } else {
+    openAuthDialog('login');
+  }
 });
 
-// Render demo cards immediately; replace them with TMDB results when configured.
-rememberMovies(demoMovies);
+$('#sign-out').addEventListener('click', signOut);
+$('#profile-logout').addEventListener('click', async () => {
+  await signOut();
+  if (!authUser) $('#profile-dialog').close();
+});
+$('#profile-close').addEventListener('click', () => $('#profile-dialog').close());
+$('#auth-form').addEventListener('submit', submitAuth);
+$('#auth-mode-toggle').addEventListener('click', () => {
+  setAuthMode(authMode === 'login' ? 'register' : 'login');
+  (authMode === 'register' ? $('#auth-name') : $('#auth-email')).focus();
+});
+$('#auth-method-toggle').addEventListener('click', () => {
+  loginMethod = loginMethod === 'password' ? 'code' : 'password';
+  const useCode = loginMethod === 'code';
+  $('#auth-password-field').hidden = useCode;
+  $('#auth-password').required = !useCode;
+  $('#auth-password').value = '';
+  $('#auth-method-toggle').textContent = useCode
+    ? 'Use your password instead'
+    : 'Use a one-time email code instead';
+  $('#auth-description').textContent = useCode
+    ? 'We’ll send a one-time code to your email address.'
+    : 'Sign in with your email and password, or choose email-code sign-in.';
+  $('#auth-submit-label').textContent = useCode ? 'Send sign-in code' : 'Sign in';
+  $('#auth-message').textContent = '';
+  $('#auth-email').focus();
+});
+$('#auth-password-toggle').addEventListener('click', () => {
+  const input = $('#auth-password');
+  const visible = input.type === 'password';
+  input.type = visible ? 'text' : 'password';
+  $('#auth-password-toggle').textContent = visible ? 'Hide' : 'Show';
+  $('#auth-password-toggle').setAttribute('aria-label', visible ? 'Hide password' : 'Show password');
+  $('#auth-password-toggle').setAttribute('aria-pressed', String(visible));
+});
+$('#auth-resend').addEventListener('click', resendAuthCode);
+$('#auth-close').addEventListener('click', () => $('#auth-dialog').close());
+$('#auth-dialog').addEventListener('click', (event) => {
+  if (event.target === $('#auth-dialog')) $('#auth-dialog').close();
+});
+$('#movie-dialog').addEventListener('close', () => {
+  const url = new URL(window.location.href);
+  if (url.searchParams.has('movie')) {
+    url.searchParams.delete('movie');
+    history.replaceState({}, '', url);
+  }
+});
+window.addEventListener('popstate', () => {
+  const movieId = new URL(window.location.href).searchParams.get('movie');
+  const match = /^tmdb-(movie|tv)-(\d+)$/.exec(movieId || '');
+  if (!match) {
+    if ($('#movie-dialog').open) $('#movie-dialog').close();
+    return;
+  }
+  if ($('#movie-dialog').open) $('#movie-dialog').close();
+  window.ZivaCatalogue.get(`${match[1]}/${match[2]}`).then((raw) => {
+    const movie = window.ZivaCatalogue.normalize(raw, match[1]);
+    if (movie) {
+      rememberMovies([movie]);
+      openMovie(movie);
+    }
+  }).catch(() => showToast('This shared movie page is temporarily unavailable.'));
+});
+
 render();
 initializeCatalogue();
+restoreAuthSession();
