@@ -53,6 +53,30 @@ test('generated Android project uses ZIVA launcher and branded splash resources'
   assert.match(fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main', 'res', 'drawable', 'ic_ziva_launcher.xml'), 'utf8'), /#FF5F1F/);
 });
 
+test('Capacitor iOS project includes ZIVA identity, iPhone and iPad orientation support, and branded assets', () => {
+  const project = path.join(root, 'ios', 'App');
+  const plist = fs.readFileSync(path.join(project, 'App', 'Info.plist'), 'utf8');
+  const projectFile = fs.readFileSync(path.join(project, 'App.xcodeproj', 'project.pbxproj'), 'utf8');
+  const appIcon = fs.readFileSync(path.join(project, 'App', 'Assets.xcassets', 'AppIcon.appiconset', 'AppIcon-512@2x.png'));
+  const splashDirectory = path.join(project, 'App', 'Assets.xcassets', 'Splash.imageset');
+  const splashContents = JSON.parse(fs.readFileSync(path.join(splashDirectory, 'Contents.json'), 'utf8'));
+  const generator = fs.readFileSync(path.join(root, 'scripts', 'generate-platform-assets.js'), 'utf8');
+  assert.ok(fs.existsSync(path.join(project, 'App.xcodeproj', 'project.pbxproj')));
+  assert.match(plist, /<string>ZIVA<\/string>/);
+  assert.match(plist, /UISupportedInterfaceOrientations~ipad/);
+  assert.match(projectFile, /PRODUCT_BUNDLE_IDENTIFIER = com\.ziva\.platform/);
+  assert.equal(appIcon.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(appIcon.readUInt32BE(16), 1024);
+  assert.equal(appIcon.readUInt32BE(20), 1024);
+  for (const [image, expectedSize] of splashContents.images.map((item, index) => [item, [2732, 1366, 910][index]])) {
+    const splash = fs.readFileSync(path.join(splashDirectory, image.filename));
+    assert.equal(splash.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(splash.readUInt32BE(16), expectedSize);
+    assert.equal(splash.readUInt32BE(20), expectedSize);
+  }
+  assert.match(generator, /255, 95, 31/);
+});
+
 test('native API client rewrites only same-origin API requests to the configured HTTPS server', async () => {
   const script = fs.readFileSync(path.join(root, 'src', 'api-client.js'), 'utf8');
   const requests = [];
@@ -71,6 +95,28 @@ test('native API client rewrites only same-origin API requests to the configured
   await window.fetch('https://cdn.example.com/library.js');
   assert.equal(requests[1][0], 'https://cdn.example.com/library.js');
   assert.equal(window.zivaApiUrl('/api/library').origin, 'https://api.ziva.example');
+});
+
+test('responsive web layout defines mobile breakpoints and visible keyboard focus', () => {
+  const styles = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+  const pages = ['index.html', 'anime.html', 'account.html', 'plans.html', 'admin/index.html'];
+  for (const page of pages) {
+    assert.match(fs.readFileSync(path.join(root, page), 'utf8'), /name="viewport"/);
+  }
+  assert.match(styles, /@media\s*\(max-width:\s*820px\)/);
+  assert.match(styles, /@media\s*\(max-width:\s*600px\)/);
+  assert.match(styles, /:focus-visible/);
+  assert.match(styles, /prefers-reduced-motion/);
+});
+
+test('Android release signing reads only a gitignored local properties file', () => {
+  const gradle = fs.readFileSync(path.join(root, 'android', 'app', 'build.gradle'), 'utf8');
+  const ignore = fs.readFileSync(path.join(root, '.gitignore'), 'utf8');
+  assert.match(gradle, /keystore\.properties/);
+  assert.match(gradle, /storePassword/);
+  assert.match(gradle, /keyPassword/);
+  assert.match(ignore, /android\/keystore\.properties/);
+  assert.match(ignore, /android\/\*\.jks/);
 });
 
 test('admin page uses absolute dashboard asset paths from both admin route forms', () => {

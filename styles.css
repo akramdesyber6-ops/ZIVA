@@ -186,3 +186,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand-orange);outli
   .history-item{align-items:flex-start;flex-direction:column}
   .history-item progress{width:100%}
 }
+
+:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+@media(forced-colors:active){:focus-visible{outline:2px solid Highlight}.movie-card,.panel,.admin-panel{forced-color-adjust:auto}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}

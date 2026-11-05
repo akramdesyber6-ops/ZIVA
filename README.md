@@ -100,7 +100,7 @@ This assigns the first administrator role only from a trusted database-admin con
 - Guest watchlist plus Supabase-synchronized user lists, favourites, profile and playback progress.
 - Secure server-side user and admin endpoints, with migration-backed row-level security.
 - Installable PWA with an offline shell and a bounded cache of public catalogue responses only.
-- Capacitor Android source project with HTTPS API-origin configuration.
+- Capacitor Android and iOS source projects with branded native assets and HTTPS API-origin configuration.
 - Keyboard support, semantic controls and reduced-motion preference.
 - No framework migration or frontend bundler required.
 
@@ -128,11 +128,11 @@ The current admin control center supports user/role review, curated movie/series
 
 Serve ZIVA over HTTPS (or localhost during development), then use the browser's **Install app** / **Add to Home Screen** action. The service worker precaches the public application shell and may cache up to 50 public TMDB/AniList metadata responses. Authentication, profile, library, history, billing, playback and admin APIs are excluded. The PWA does not make protected video available offline.
 
-## Capacitor Android
+## Capacitor Android and iOS
 
-Install Node.js 22+, Android Studio/Android SDK and a supported JDK. Copy `.env.example` to a local `.env` or export the values in the build environment. Set `ZIVA_API_BASE_URL` to the real deployed HTTPS ZIVA server origin (no path or credentials); do not substitute an invented production hostname. The web assets contain only this public API origin, never private credentials.
+Install Node.js 22+, Android Studio/Android SDK and a supported JDK for Android. iOS source generation/sync is cross-platform, but Xcode builds and simulator/device tests require macOS with Xcode. Copy `.env.example` to a local `.env` or export the values in the build environment. Set `ZIVA_API_BASE_URL` to the real deployed HTTPS ZIVA server origin (no path or credentials); do not substitute an invented production hostname. The web assets contain only this public API origin, never private credentials.
 
-Configure the backend's `MOBILE_APP_ORIGINS` with the native WebView origins (usually `https://localhost,capacitor://localhost`) and `APP_ORIGIN` with the deployed web origin. Native API calls require credentialed CORS, Secure `SameSite=None` cookies, and CSRF validation. HTTPS and a reachable backend are required.
+Configure the backend's `MOBILE_APP_ORIGINS` with the Capacitor origins in use (typically `https://localhost,capacitor://localhost`) and `APP_ORIGIN` with the deployed web origin. Native API calls require credentialed CORS, Secure `SameSite=None` cookies, and CSRF validation. HTTPS and a reachable backend are required. Validate session restoration and logout on real Android and iOS devices: WebView cookie persistence and platform privacy rules can differ from desktop-browser behavior.
 
 ```bash
 npm install
@@ -141,6 +141,30 @@ npm run android:build
 ```
 
 `android:build` adds the Capacitor Android platform if it is missing, syncs the web assets, then builds a debug APK at `android/app/build/outputs/apk/debug/app-debug.apk`. The script requires `ZIVA_API_BASE_URL`, Java, and an Android SDK (`ANDROID_HOME` or `ANDROID_SDK_ROOT`). The native application ID is `com.ziva.platform`; change it before publishing if a different reverse-domain ID is required. iOS compilation requires macOS and Xcode.
+
+Android signed release preparation:
+
+1. From the `android` directory, generate the release keystore using `keytool -genkeypair -v -keystore ziva-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias ziva`. The keystore path is gitignored, but back it up securely.
+2. Keep the keystore and passwords outside version control. Create local `android/keystore.properties` with `storeFile=ziva-release.jks`, `storePassword=...`, `keyAlias=ziva`, and `keyPassword=...`. This file and keystore extensions are gitignored.
+3. Back up the keystore securely; losing it may prevent updating an app distributed outside Play App Signing.
+4. On Windows, run `npm run mobile:prepare`, then `cd android` and `gradlew.bat bundleRelease`. The AAB will be in `android/app/build/outputs/bundle/release/`. Confirm the release is signed with the intended key before distribution. Google Play Console enrollment, app signing, privacy/data declarations, content rights and store review are separate requirements.
+
+iOS source and branding:
+
+```bash
+npm run ios:add
+# After adding once:
+npm run ios:sync
+npm run ios:open
+```
+
+`ios:add` creates the Capacitor Xcode project; `ios:sync` regenerates the ZIVA icon/splash assets and copies the shared frontend into it. On macOS, use Xcode to select the `App` target, set the Apple Developer Team and a unique production bundle identifier, configure automatic or manual signing, and select an iPhone/iPad simulator or device. For distribution, archive with Xcode and validate/export for App Store Connect or TestFlight. Apple Developer Program enrollment, certificates, provisioning profiles, App Store Connect metadata, privacy disclosures, age/content ratings, rights and App Review are required. No IPA or signed iOS build is created by the Windows workflow.
+
+## Desktop and browser support
+
+The shared responsive web/PWA app is the cross-desktop delivery path for Windows, macOS and Linux; it talks to the same Node/Supabase backend and does not create platform-specific accounts. The responsive stylesheet adapts navigation and catalog grids for narrow screens, supports keyboard-operable cards, visible focus, and reduced-motion preferences. Desktop browser engines remain distinct and should be tested on current Chrome, Edge, Firefox and Safari before release; only the browser actually used for a smoke run should be reported as tested.
+
+Tauri v2 was evaluated for optional native desktop shells and is deliberately not added yet. It can reuse the web UI while packaging per-OS WebView runtimes, but requires Rust/Cargo and per-platform signing/installer pipelines. Windows uses WebView2, macOS uses WKWebView, and Linux depends on WebKitGTK; this adds engine-specific behavior and expands the native release matrix without improving the shared backend. Keep the browser/PWA as the supported desktop experience until desktop product requirements justify native packaging and cookie/auth compatibility is validated on each OS. Do not treat Tauri packaging as implemented or tested.
 
 ## Validation
 
