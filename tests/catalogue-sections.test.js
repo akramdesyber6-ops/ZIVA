@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   createPageSection,
+  createHomeSections,
   resolveGenreId,
   unique,
   nextPage
@@ -20,6 +21,16 @@ test('home, movies, series and genre catalogues use distinct TMDB endpoints', ()
   assert.equal(movieGenre.params.with_genres, 28);
   assert.equal(tvGenre.path, 'discover/tv');
   assert.equal(tvGenre.params.with_genres, 10759);
+});
+
+test('home sections have unique keys and real movie and TV catalogue endpoints', () => {
+  const sections = createHomeSections();
+  assert.equal(new Set(sections.map((section) => section.key)).size, sections.length);
+  assert.deepEqual(sections.map((section) => section.path), [
+    'trending/movie/week', 'trending/tv/week', 'movie/top_rated',
+    'tv/top_rated', 'movie/now_playing', 'tv/on_the_air'
+  ]);
+  assert.ok(sections.every((section) => section.page === 0 && section.items.length === 0));
 });
 
 test('genre filters use the matching movie or TV genre taxonomy', () => {
@@ -54,17 +65,19 @@ test('pagination advances until the reported final page and blocks concurrent re
   assert.equal(nextPage(section), null);
 });
 
-test('TMDB allowlist supports movie and TV browse, detail, genre and provider routes', () => {
+test('TMDB allowlist supports movie and TV browse, season, detail, genre and provider routes', () => {
   for (const route of [
     'discover/movie', 'discover/tv', 'movie/popular', 'tv/popular',
     'genre/movie/list', 'genre/tv/list', 'movie/123/watch/providers',
     'tv/123/watch/providers', 'movie/123/videos', 'tv/123/videos',
-    'search/movie', 'search/tv'
+    'search/movie', 'search/tv', 'tv/123/season/1'
   ]) {
     assert.equal(validatePath(route), route);
   }
   assert.equal(validatePath('search/multi'), 'search/multi');
   assert.throws(() => validatePath('discover/person'));
+  assert.throws(() => validatePath('tv/123/season/-1'));
+  assert.throws(() => validatePath('tv/123/season/not-a-number'));
 });
 
 test('TMDB query validation supports numeric genre filters and pagination', () => {

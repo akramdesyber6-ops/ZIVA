@@ -1,22 +1,6 @@
 
 'use strict';
 
-// ZIVA Stage 2B: live TMDB catalogue with a demo fallback.
-const demoMovies = [
-  {id:'horizon',title:'The Last Horizon',year:2026,genre:'Sci-Fi',rating:'8.9',type:'Movie',description:'A crew on a distant mission discovers a mysterious signal that challenges everything humanity believes about its place in the universe.',image:'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?auto=format&fit=crop&w=700&q=85'},
-  {id:'protocol',title:'Shadow Protocol',year:2025,genre:'Action',rating:'8.2',type:'Movie',description:'An elite operative is pulled into a high-stakes conspiracy where every ally seems to have a secret.',image:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=700&q=85'},
-  {id:'deep',title:'Beyond the Deep',year:2026,genre:'Drama',rating:'8.5',type:'Movie',description:'A moving story of courage, family and second chances set against the vastness of the ocean.',image:'https://images.unsplash.com/photo-1518837695005-2083093ee35b?auto=format&fit=crop&w=700&q=85'},
-  {id:'neon',title:'Neon City',year:2025,genre:'Thriller',rating:'7.9',type:'Series',description:'In a city that never sleeps, one detective follows a trail of clues into a dangerous underworld.',image:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=700&q=85'},
-  {id:'kingdom',title:'Kingdom of Ash',year:2026,genre:'Action',rating:'8.7',type:'Movie',description:'A forgotten heir must unite rival kingdoms before an ancient threat rises again.',image:'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=700&q=85'},
-  {id:'little',title:'Little Big World',year:2025,genre:'Animation',rating:'8.4',type:'Movie',description:'An unlikely friendship takes two tiny adventurers on the biggest journey of their lives.',image:'https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&w=700&q=85'},
-  {id:'silent',title:'The Silent Hour',year:2024,genre:'Thriller',rating:'7.8',type:'Movie',description:'A witness and a detective race against time when a quiet night turns into a mystery.',image:'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=700&q=85'},
-  {id:'summer',title:'Summer Again',year:2025,genre:'Comedy',rating:'7.6',type:'Series',description:'One unexpected summer brings old friends together and changes the plans they thought they had.',image:'https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?auto=format&fit=crop&w=700&q=85'},
-  {id:'storm',title:'After the Storm',year:2026,genre:'Drama',rating:'8.1',type:'Movie',description:'A family rebuilds its life and discovers that hope can arrive from the most unexpected places.',image:'https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=700&q=85'},
-  {id:'velocity',title:'Velocity',year:2025,genre:'Action',rating:'8.0',type:'Movie',description:'A street racer gets one final chance to settle a score and protect the people he loves.',image:'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=700&q=85'},
-  {id:'parallel',title:'Parallel',year:2024,genre:'Sci-Fi',rating:'8.3',type:'Series',description:'Two strangers in different realities discover that their lives are connected by one impossible choice.',image:'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=700&q=85'},
-  {id:'wild',title:'Wild Hearts',year:2025,genre:'Animation',rating:'8.6',type:'Movie',description:'A young explorer sets out to protect a magical forest and the creatures who call it home.',image:'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=700&q=85'}
-];
-
 const $ = (selector) => document.querySelector(selector);
 const watchlistKey = 'ziva-watchlist';
 const legacyWatchlistKey = 'justwatch-demo-watchlist';
@@ -48,8 +32,14 @@ let watchlistFilter = 'all';
 let searchPage = 1;
 let searchTotalPages = 1;
 let searchLoading = false;
+let searchController = null;
+let searchRequestId = 0;
 let catalogueGenres = [];
 let movieRequestId = 0;
+let seasonRequestId = 0;
+let selectedEpisode = null;
+let catalogueObserver = null;
+let lastCatalogueRefresh = 0;
 let lastProgressSavedAt = 0;
 let progressSavePending = false;
 let progressRestoreFor = '';
@@ -68,6 +58,7 @@ function getPageContext() {
       mediaType: params.get('media') === 'tv' ? 'tv' : 'movie'
     };
   }
+
   if (pathname === '/movies') return { page: 'movies', mediaType: 'movie' };
   if (pathname === '/series') return { page: 'series', mediaType: 'tv' };
   if (pathname === '/watchlist') return { page: 'watchlist', mediaType: 'movie' };
@@ -251,6 +242,8 @@ function render() {
     const root = document.getElementById(`catalogue-${section.key}`);
     if (!root) return;
     if (section.heading) return;
+    root.hidden = searchResults !== null && index > 0;
+    if (root.hidden) return;
     root.hidden = false;
     const title = root.querySelector('h2');
     const grid = root.querySelector('.movie-grid');
@@ -299,6 +292,10 @@ function render() {
 }
 
 function renderCatalogueShell(sections) {
+  if (catalogueObserver) {
+    catalogueObserver.disconnect();
+    catalogueObserver = null;
+  }
   const root = $('#catalogue-sections');
   root.innerHTML = sections.map((section) => section.heading
     ? `<section class="content-section catalogue-section genre-group-heading" id="catalogue-${escapeHtml(section.key)}"><h2>${escapeHtml(section.title)}</h2></section>`
@@ -312,6 +309,7 @@ function renderCatalogueShell(sections) {
     </section>
   `).join('');
   render();
+  observeCatalogueSections();
 }
 
 async function loadSection(section, page = null) {
@@ -344,23 +342,23 @@ async function loadSection(section, page = null) {
 }
 
 function observeCatalogueSections() {
-  const remaining = catalogueSections.slice(4).filter((section) => !section.heading);
+  const remaining = catalogueSections.slice(2).filter((section) => !section.heading);
   if (!('IntersectionObserver' in window)) {
     remaining.forEach((section) => loadSection(section));
     return;
   }
 
-  const observer = new IntersectionObserver((entries) => {
+  catalogueObserver = new IntersectionObserver((entries) => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
-      observer.unobserve(entry.target);
+      catalogueObserver.unobserve(entry.target);
       const section = catalogueSections.find((item) => item.key === entry.target.dataset.section);
       if (section) loadSection(section);
     }
   }, { rootMargin: '500px 0px' });
   remaining.forEach((section) => {
     const element = document.getElementById(`catalogue-${section.key}`);
-    if (element) observer.observe(element);
+    if (element) catalogueObserver.observe(element);
   });
 }
 
@@ -673,7 +671,9 @@ async function signOut() {
 function openMovie(movie) {
   if (!movie) return;
 
+  seasonRequestId += 1;
   currentMovie = movie;
+  selectedEpisode = null;
   lastProgressSavedAt = 0;
   progressRestoreFor = '';
   const requestId = ++movieRequestId;
@@ -710,9 +710,15 @@ function openMovie(movie) {
   $('#dialog-trailer').hidden = true;
   $('#dialog-providers').textContent = 'Checking official streaming availability…';
   $('#playback-status').textContent = 'Playback availability is checked when you choose Play.';
-  $('#dialog-play').disabled = false;
+  $('#dialog-play').disabled = mediaType === 'tv';
   $('#dialog-play').textContent = 'Play title';
   $('#dialog-download').hidden = true;
+  $('#episode-selector').hidden = mediaType !== 'tv';
+  $('#episode-season').replaceChildren(new Option('Loading seasons…', ''));
+  $('#episode-season').disabled = true;
+  $('#episode-choice').replaceChildren(new Option('Select a season first', ''));
+  $('#episode-choice').disabled = true;
+  $('#episode-status').textContent = '';
   clearPlayer();
 
   $('#movie-dialog').showModal();
@@ -734,7 +740,7 @@ async function loadMovieLinks(movie, tmdbId, mediaType, requestId) {
   if (requestId !== movieRequestId || !$('#movie-dialog').open) return;
 
   if (detailResult.status === 'fulfilled') {
-    const detail = window.ZivaCatalogue.normalize(detailResult.value, 'movie');
+    const detail = window.ZivaCatalogue.normalize(detailResult.value, mediaType);
     if (detail) {
       Object.assign(movie, detail);
       $('#dialog-title').textContent = detail.title;
@@ -742,6 +748,25 @@ async function loadMovieLinks(movie, tmdbId, mediaType, requestId) {
       $('#dialog-meta').textContent = `★ ${detail.rating} · ${detail.year || 'Release date unavailable'} · ${detail.voteCount.toLocaleString()} ratings`;
       $('#dialog-genre').textContent = (detail.genres || [detail.genre]).join(' · ').toUpperCase();
     }
+    if (mediaType === 'tv') {
+      const seasons = (Array.isArray(detailResult.value.seasons) ? detailResult.value.seasons : []).filter((season) =>
+        Number.isSafeInteger(season.season_number) && season.season_number >= 0
+      );
+      const select = $('#episode-season');
+      select.replaceChildren(new Option('Choose a season', ''));
+      seasons.forEach((season) => {
+        const label = season.name || `Season ${season.season_number}`;
+        select.add(new Option(label, String(season.season_number)));
+      });
+      select.value = '';
+      select.disabled = seasons.length === 0;
+      $('#episode-status').textContent = seasons.length
+        ? 'Select a season and episode. Playback requires an authorized provider.'
+        : 'No season information is available for this series.';
+    }
+  } else if (mediaType === 'tv') {
+    $('#episode-season').replaceChildren(new Option('Season information unavailable', ''));
+    $('#episode-status').textContent = 'Season information could not be loaded. Try reopening the series.';
   }
 
   if (videosResult.status === 'fulfilled') {
@@ -788,6 +813,41 @@ async function loadMovieLinks(movie, tmdbId, mediaType, requestId) {
     }
   }
   providerNode.textContent = `Currently unavailable for streaming in ${region}.`;
+}
+
+async function loadSeasonEpisodes(seasonNumber) {
+  const movie = currentMovie;
+  const requestId = ++seasonRequestId;
+  selectedEpisode = null;
+  $('#episode-choice').replaceChildren(new Option('Loading episodes…', ''));
+  $('#episode-choice').disabled = true;
+  $('#dialog-play').disabled = true;
+  $('#episode-status').textContent = 'Loading episode information…';
+  clearPlayer();
+
+  try {
+    const data = await window.ZivaCatalogue.get(`tv/${movie.tmdbId}/season/${seasonNumber}`);
+    if (requestId !== seasonRequestId || currentMovie !== movie || !$('#movie-dialog').open) return;
+    const episodes = (Array.isArray(data.episodes) ? data.episodes : []).filter((episode) =>
+      Number.isSafeInteger(episode.episode_number) && episode.episode_number > 0
+    );
+    const select = $('#episode-choice');
+    select.replaceChildren(new Option('Choose an episode', ''));
+    episodes.forEach((episode) => {
+      const label = episode.name || `Episode ${episode.episode_number}`;
+      select.add(new Option(`${episode.episode_number}. ${label}`, String(episode.episode_number)));
+    });
+    select.value = '';
+    select.disabled = episodes.length === 0;
+    $('#episode-status').textContent = episodes.length
+      ? 'Choose an episode before checking protected playback.'
+      : 'No episodes are listed for this season.';
+  } catch {
+    if (requestId !== seasonRequestId) return;
+    $('#episode-choice').replaceChildren(new Option('Episodes unavailable', ''));
+    $('#episode-choice').disabled = true;
+    $('#episode-status').textContent = 'Episodes could not be loaded. Select the season again to retry.';
+  }
 }
 
 let activeHlsPlayer = null;
@@ -856,6 +916,11 @@ async function savePlaybackProgress(force = false) {
 
 async function requestMoviePlayback() {
   if (!currentMovie) return;
+  const mediaType = currentMovie.tmdbType || 'movie';
+  if (mediaType === 'tv' && !selectedEpisode) {
+    $('#playback-status').textContent = 'Select a season and episode before checking playback.';
+    return;
+  }
   const button = $('#dialog-play');
   const status = $('#playback-status');
   button.disabled = true;
@@ -866,7 +931,11 @@ async function requestMoviePlayback() {
   try {
     const url = new URL('/api/playback/authorize', window.location.origin);
     url.searchParams.set('tmdbId', String(currentMovie.tmdbId));
-    url.searchParams.set('mediaType', currentMovie.tmdbType || 'movie');
+    url.searchParams.set('mediaType', mediaType);
+    if (selectedEpisode) {
+      url.searchParams.set('seasonNumber', String(selectedEpisode.seasonNumber));
+      url.searchParams.set('episodeNumber', String(selectedEpisode.episodeNumber));
+    }
     const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
     const payload = await response.json().catch(() => ({}));
     if (response.status === 401 || response.status === 403) {
@@ -905,10 +974,7 @@ async function requestMoviePlayback() {
     } else {
       video.src = streamUrl;
     }
-    status.textContent = 'Authorized stream ready. Playback begins when you press Play.';
-    video.play().catch(() => {
-      status.textContent = 'The stream is ready. Press Play to start playback.';
-    });
+    status.textContent = 'Authorized source ready. Use the player controls to start playback.';
 
     const download = payload.download;
     if (download && download.allowed === true && safeExternalUrl(download.url)) {
@@ -917,10 +983,10 @@ async function requestMoviePlayback() {
       link.hidden = false;
     }
   } catch {
-    status.textContent = 'Playback could not be checked. Please try again.';
+    status.textContent = 'Playback could not be checked. Select Retry to try again.';
   } finally {
     button.disabled = false;
-    button.textContent = 'Play title';
+    button.textContent = mediaType === 'tv' ? 'Check episode playback' : 'Check playback';
   }
 }
 
@@ -928,6 +994,15 @@ $('#movie-player').addEventListener('loadedmetadata', restorePlaybackProgress);
 $('#movie-player').addEventListener('timeupdate', () => savePlaybackProgress());
 $('#movie-player').addEventListener('pause', () => savePlaybackProgress(true));
 $('#movie-player').addEventListener('ended', () => savePlaybackProgress(true));
+$('#movie-player').addEventListener('playing', () => {
+  $('#playback-status').textContent = 'Playback is in progress.';
+});
+$('#movie-player').addEventListener('waiting', () => {
+  $('#playback-status').textContent = 'Buffering authorized media…';
+});
+$('#movie-player').addEventListener('error', () => {
+  $('#playback-status').textContent = 'The authorized media could not be played. You can retry the playback check.';
+});
 
 function safeExternalUrl(value) {
   try {
@@ -1114,11 +1189,13 @@ async function loadLiveCatalogue() {
     selectedGenreId = $('#genre-filter').value;
     currentGenreId = selectedGenreId ? Number(selectedGenreId) : null;
   }
-  catalogueSections = [window.ZivaCatalogueSections.createPageSection({
-    page: currentPage === 'home' ? 'home' : currentPage === 'genre' ? 'genre' : currentPage,
-    mediaType: currentMediaType,
-    genreId: currentGenreId
-  })];
+  catalogueSections = currentPage === 'home'
+    ? window.ZivaCatalogueSections.createHomeSections()
+    : [window.ZivaCatalogueSections.createPageSection({
+      page: currentPage === 'genre' ? 'genre' : currentPage,
+      mediaType: currentMediaType,
+      genreId: currentGenreId
+    })];
   if (currentPage === 'genre') catalogueSections[0].title = pageTitlesForGenre(currentGenreSlug);
   renderCatalogueShell(catalogueSections);
   catalogueMode = 'live';
@@ -1130,11 +1207,35 @@ async function loadLiveCatalogue() {
     setCatalogueStatus(catalogueSections[0].error, 'error');
   } else {
     setCatalogueStatus(`Showing live ${currentMediaType === 'tv' ? 'series' : 'movie'} metadata from TMDB.`, 'live');
-    await loadSection(catalogueSections[0], 1);
+    await Promise.all(catalogueSections.slice(0, currentPage === 'home' ? 2 : 1)
+      .map((section) => loadSection(section, 1)));
   }
+  lastCatalogueRefresh = Date.now();
   await restoreSavedTmdbTitles();
   render();
   await restoreSharedMovieLink();
+}
+
+async function refreshVisibleCatalogue() {
+  if (catalogueMode !== 'live' || currentPage === 'watchlist'
+      || searchResults !== null || Date.now() - lastCatalogueRefresh < 60_000) return;
+  lastCatalogueRefresh = Date.now();
+  const sections = catalogueSections.filter((section) => section.page > 0 && !section.loading);
+  const results = await Promise.allSettled(sections.map(async (section) => {
+    const data = await window.ZivaCatalogue.get(section.path, { ...section.params, page: 1 }, { forceRefresh: true });
+    const refreshedItems = window.ZivaCatalogue.normalizeList(data.results || [], section.mediaType);
+    const refreshedIds = new Set(refreshedItems.map((item) => item.id));
+    section.items = window.ZivaCatalogue.unique(refreshedItems.concat(
+      section.items.filter((item) => !refreshedIds.has(item.id))
+    ));
+    section.totalPages = Math.min(Number(data.total_pages) || 1, 500);
+    section.error = '';
+    rememberMovies(section.items);
+  }));
+  if (results.some((result) => result.status === 'rejected')) {
+    setCatalogueStatus('Some catalogue sections could not be refreshed. Showing the last loaded metadata.', 'error');
+  }
+  render();
 }
 
 function pageTitlesForGenre(slug) {
@@ -1156,13 +1257,17 @@ async function runSearch(query, page = 1) {
 
   searchLoading = true;
   searchError = '';
+  if (searchController) searchController.abort();
+  const controller = new AbortController();
+  searchController = controller;
+  const requestId = ++searchRequestId;
   render();
   setCatalogueStatus(`Searching TMDB for “${query}”…`, 'live');
 
   try {
-    const response = await window.ZivaCatalogue.search(query, page, currentMediaType);
+    const response = await window.ZivaCatalogue.search(query, page, currentMediaType, { signal: controller.signal });
 
-    if ($('#search-input').value.trim() !== query) return;
+    if (requestId !== searchRequestId || $('#search-input').value.trim() !== query) return;
 
     searchResults = page === 1
       ? response.items
@@ -1176,12 +1281,16 @@ async function runSearch(query, page = 1) {
       'live'
     );
   } catch {
+    if (controller.signal.aborted || requestId !== searchRequestId) return;
     searchError = 'TMDB search is temporarily unavailable. Try again shortly.';
     if (page === 1) searchResults = [];
     setCatalogueStatus(searchError, 'error');
   } finally {
-    searchLoading = false;
-    render();
+    if (requestId === searchRequestId) {
+      searchLoading = false;
+      if (searchController === controller) searchController = null;
+      render();
+    }
   }
 }
 
@@ -1291,6 +1400,10 @@ $('#search-toggle').addEventListener('click', () => {
 $('#search-input').addEventListener('input', (event) => {
   searchTerm = event.target.value.trim().toLowerCase();
 
+  if (searchController) searchController.abort();
+  searchController = null;
+  searchRequestId += 1;
+  searchLoading = false;
   searchResults = null;
   render();
 
@@ -1397,6 +1510,33 @@ $('#dialog-favorite').addEventListener('click', () => {
 
 $('#dialog-share').addEventListener('click', shareMovie);
 $('#dialog-play').addEventListener('click', requestMoviePlayback);
+$('#episode-season').addEventListener('change', (event) => {
+  const seasonNumber = Number(event.target.value);
+  if (!event.target.value || !Number.isSafeInteger(seasonNumber) || seasonNumber < 0 || !currentMovie) {
+    seasonRequestId += 1;
+    selectedEpisode = null;
+    $('#episode-choice').replaceChildren(new Option('Select a season first', ''));
+    $('#episode-choice').disabled = true;
+    $('#dialog-play').disabled = true;
+    clearPlayer();
+    return;
+  }
+  loadSeasonEpisodes(seasonNumber);
+});
+$('#episode-choice').addEventListener('change', (event) => {
+  const episodeNumber = Number(event.target.value);
+  const seasonNumber = Number($('#episode-season').value);
+  if (!event.target.value || !Number.isSafeInteger(seasonNumber) || seasonNumber < 0
+      || !Number.isSafeInteger(episodeNumber) || episodeNumber < 1) {
+    selectedEpisode = null;
+    $('#dialog-play').disabled = true;
+    return;
+  }
+  selectedEpisode = { seasonNumber, episodeNumber };
+  clearPlayer();
+  $('#dialog-play').disabled = false;
+  $('#playback-status').textContent = `Ready to check protected playback for S${seasonNumber} E${episodeNumber}.`;
+});
 
 $('#featured-button').addEventListener('click', () => {
   const trending = catalogueSections.find((section) => section.key === 'trending');
@@ -1477,6 +1617,12 @@ window.addEventListener('popstate', () => {
     }
   }).catch(() => showToast('This shared movie page is temporarily unavailable.'));
 });
+
+window.addEventListener('focus', refreshVisibleCatalogue);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshVisibleCatalogue();
+});
+setInterval(refreshVisibleCatalogue, 60_000);
 
 render();
 initializeCatalogue();

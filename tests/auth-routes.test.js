@@ -753,6 +753,49 @@ test('playback adapter returns only approved HTTPS streams and explicitly permit
   assert.doesNotMatch(JSON.stringify(payload), /service.role|secret|token/i);
 });
 
+test('series playback requires a selected episode and passes it to the authorized provider', async (t) => {
+  let resolved;
+  const harness = await createHarness({
+    playbackProvider: {
+      resolveTitle: async (request) => {
+        resolved = request;
+        return {
+          authorized: true,
+          streamUrl: 'https://media.provider.example/series/42/season/2/episode/4.m3u8',
+          streamType: 'application/vnd.apple.mpegurl'
+        };
+      }
+    }
+  });
+  t.after(() => harness.close());
+  const csrf = await csrfFor(harness);
+  await register(harness, csrf);
+  const verified = await verifySignup(harness, csrf, 'person@example.com');
+  const headers = { Cookie: cookieHeader(cookieMap(verified)) };
+  const missingEpisode = await fetch(
+    `${harness.origin}/api/playback/authorize?tmdbId=42&mediaType=tv`,
+    { headers }
+  );
+  assert.equal(missingEpisode.status, 400);
+  assert.equal(resolved, undefined);
+
+  const response = await fetch(
+    `${harness.origin}/api/playback/authorize?tmdbId=42&mediaType=tv&seasonNumber=2&episodeNumber=4`,
+    { headers }
+  );
+  assert.equal(response.status, 200);
+  assert.equal(resolved.tmdbId, 42);
+  assert.equal(resolved.mediaType, 'tv');
+  assert.equal(resolved.seasonNumber, 2);
+  assert.equal(resolved.episodeNumber, 4);
+
+  const invalidEpisode = await fetch(
+    `${harness.origin}/api/playback/authorize?tmdbId=42&mediaType=tv&seasonNumber=2.5&episodeNumber=4`,
+    { headers }
+  );
+  assert.equal(invalidEpisode.status, 400);
+});
+
 test('playback fails closed for unauthorized titles and rejects unapproved provider URLs', async (t) => {
   const harness = await createHarness({
     playbackProvider: {
@@ -783,7 +826,7 @@ test('separate catalogue and account paths serve their dedicated responsive page
     assert.match(response.headers.get('content-type'), /text\/html/);
   }
   const app = await (await fetch(`${harness.origin}/app.js`)).text();
-  assert.match(app, /search\(query, page, currentMediaType\)/);
+  assert.match(app, /search\(query, page, currentMediaType, \{ signal: controller\.signal \}\)/);
   assert.match(app, /tmdb-\(movie\|tv\)/);
   const page = await (await fetch(`${harness.origin}/index.html`)).text();
   assert.match(page, /\/genres\/action/);

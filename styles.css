@@ -87,6 +87,13 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--brand-orange);outli
 .playback-actions{display:flex;gap:9px;margin-top:12px}
 .playback-actions a[hidden]{display:none}
 .playback-status{margin:0 0 10px}
+.episode-selector{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:22px;padding:16px;border:1px solid #ffffff16;border-radius:12px;background:#ffffff08}
+.episode-selector label{display:grid;gap:7px;color:var(--muted);font-size:11px;font-weight:700}
+.episode-selector select{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#1b1b1d;color:white}
+.episode-selector .provider-info{grid-column:1/-1;margin:0;padding:0;border:0;background:transparent}
+.player-panel{padding-top:2px}
+.video-frame video{object-fit:contain}
+@media(max-width:520px){.episode-selector{grid-template-columns:1fr}}
 @media(min-width:1440px){.movie-grid{max-width:1400px}}
 @media(max-width:1439px){.movie-grid{grid-template-columns:repeat(8,minmax(0,1fr))}}
 @media(max-width:1199px){.movie-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}

@@ -2,6 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { validatePath, buildUrl, requestTmdb, TmdbError } = require('../lib/tmdb');
+const tmdbHandler = require('../api/tmdb');
+const { MetadataCache } = require('../lib/metadata-cache');
 
 test('accepts supported trending and search paths', () => {
   assert.equal(validatePath('trending/all/week'), 'trending/all/week');
@@ -36,4 +38,46 @@ test('sends bearer token and returns successful JSON', async () => {
   assert.deepEqual(result, { results:[] });
   assert.equal(captured.authorization, 'Bearer test-token');
   assert.match(captured.url, /movie\/popular/);
+});
+
+test('TMDB API metadata responses are cached and can be revalidated', async () => {
+  const originalFetch = global.fetch;
+  const cache = new MetadataCache({ ttlMs: 60_000, staleMs: 60_000 });
+  let upstreamCalls = 0;
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ request: ++upstreamCalls })
+  });
+  const request = (headers = {}) => ({
+    method: 'GET',
+    query: { path: 'movie/popular', page: '1' },
+    headers
+  });
+  function response() {
+    return {
+      headers: {},
+      setHeader(name, value) { this.headers[name] = value; },
+      end(value) { this.body = value; }
+    };
+  }
+
+  try {
+    const first = response();
+    await tmdbHandler(request(), first, { TMDB_API_READ_ACCESS_TOKEN: 'configured-in-test' }, cache);
+    const cached = response();
+    await tmdbHandler(request(), cached, { TMDB_API_READ_ACCESS_TOKEN: 'configured-in-test' }, cache);
+    assert.equal(JSON.parse(first.body).request, 1);
+    assert.equal(JSON.parse(cached.body).request, 1);
+    assert.equal(upstreamCalls, 1);
+
+    const refreshed = response();
+    await tmdbHandler(request({ 'cache-control': 'no-cache' }), refreshed, {
+      TMDB_API_READ_ACCESS_TOKEN: 'configured-in-test'
+    }, cache);
+    assert.equal(JSON.parse(refreshed.body).request, 2);
+    assert.equal(upstreamCalls, 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

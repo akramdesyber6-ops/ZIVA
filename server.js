@@ -889,6 +889,13 @@ async function handlePlaybackAuthorize(req, res, env, clientFactory, provider, p
   if (!Number.isSafeInteger(tmdbId) || tmdbId < 1 || !['movie', 'tv'].includes(mediaType)) {
     return sendJson(res, 400, { error: 'INVALID_TITLE', message: 'A valid movie or series identifier is required.' });
   }
+  const seasonNumber = params.has('seasonNumber') ? Number(params.get('seasonNumber')) : null;
+  const episodeNumber = params.has('episodeNumber') ? Number(params.get('episodeNumber')) : null;
+  if ((mediaType === 'tv' && (!Number.isSafeInteger(seasonNumber) || seasonNumber < 0
+      || !Number.isSafeInteger(episodeNumber) || episodeNumber < 1))
+      || (mediaType === 'movie' && (seasonNumber !== null || episodeNumber !== null))) {
+    return sendJson(res, 400, { error: 'INVALID_EPISODE', message: 'Series playback requires a valid season and episode selection.' });
+  }
 
   let adapter;
   try {
@@ -908,6 +915,7 @@ async function handlePlaybackAuthorize(req, res, env, clientFactory, provider, p
     const result = await adapter.resolveTitle({
       tmdbId,
       mediaType,
+      ...(mediaType === 'tv' ? { seasonNumber, episodeNumber } : {}),
       user: { id: auth.user.id, email: auth.user.email }
     });
     if (!result || result.authorized !== true) {
