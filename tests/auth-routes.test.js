@@ -105,6 +105,38 @@ function createFakeSupabase(state) {
         return { error: null };
       }
     },
+    from: (table) => {
+      const builder = {
+        updateValues: null,
+        filters: [],
+        select: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        eq: (field, value) => {
+          builder.filters.push([field, value]);
+          return builder;
+        },
+        upsert: (values, options) => {
+          state.databaseWrites.push({ table, values, options });
+          return Promise.resolve({ data: values, error: null });
+        },
+        update: (values) => {
+          builder.updateValues = values;
+          return builder;
+        },
+        delete: () => {
+          state.databaseDeletes.push({ table });
+          return builder;
+        },
+        maybeSingle: async () => ({ data: null, error: null }),
+        single: async () => ({ data: builder.updateValues || {}, error: null }),
+        then: (resolve, reject) => {
+          state.databaseQueries.push({ table, filters: builder.filters.slice() });
+          return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+        }
+      };
+      return builder;
+    },
     rpc: async (functionName) => {
       assert.equal(functionName, 'is_user_admin');
       const user = state.usersByToken.get(token);
@@ -128,7 +160,10 @@ async function createHarness(options = {}) {
     nextToken: 1,
     rateLimited: Boolean(options.rateLimited),
     sessionSet: null,
-    signOutScope: null
+    signOutScope: null,
+    databaseWrites: [],
+    databaseDeletes: [],
+    databaseQueries: []
   };
   const env = {
     SUPABASE_URL: 'https://ziva-test.supabase.co',
@@ -136,6 +171,7 @@ async function createHarness(options = {}) {
     ZIVA_PROVIDER_ALLOWED_HOSTS: 'media.provider.example,downloads.provider.example',
     NODE_ENV: options.production ? 'production' : 'test'
   };
+  if (options.mobileOrigins) env.MOBILE_APP_ORIGINS = options.mobileOrigins;
   if (options.supabaseUnavailable) {
     delete env.SUPABASE_URL;
     delete env.SUPABASE_ANON_KEY;
@@ -143,7 +179,8 @@ async function createHarness(options = {}) {
   const server = createServer({
     env,
     clientFactory: createFakeSupabase(state),
-    playbackProvider: options.playbackProvider
+    playbackProvider: options.playbackProvider,
+    animeFetch: options.animeFetch
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -389,10 +426,52 @@ test('CSRF validation protects registration and sign-in actions', async (t) => {
   assert.equal(invalid.status, 403);
 });
 
+test('configured Capacitor origins receive credentialed CORS and CSRF validation', async (t) => {
+  const harness = await createHarness({ mobileOrigins: 'capacitor://localhost,https://localhost' });
+  t.after(() => harness.close());
+  const preflight = await fetch(`${harness.origin}/api/auth/logout`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'capacitor://localhost',
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type,x-csrf-token'
+    }
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), 'capacitor://localhost');
+  assert.equal(preflight.headers.get('access-control-allow-credentials'), 'true');
+
+  const sessionResponse = await fetch(`${harness.origin}/api/auth/session`, { headers: { Origin: 'capacitor://localhost' } });
+  const session = await sessionResponse.json();
+  const cookies = cookieMap(sessionResponse);
+  const auth = await fetch(`${harness.origin}/api/auth/register`, {
+    method: 'POST',
+    headers: {
+      Origin: 'capacitor://localhost',
+      'Sec-Fetch-Site': 'cross-site',
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': session.csrfToken,
+      Cookie: cookieHeader(cookies)
+    },
+    body: JSON.stringify({ email: 'mobile@example.com', full_name: 'Mobile User', password: 'secure-password-123' })
+  });
+  assert.equal(auth.status, 202);
+  assert.match(sessionResponse.headers.get('set-cookie'), /SameSite=None; Secure/i);
+});
+
 test('anonymous and normal users cannot access protected admin or playback features', async (t) => {
   const harness = await createHarness();
   t.after(() => harness.close());
-  for (const route of ['/api/admin/permissions', '/api/playback/authorize?tmdbId=12&mediaType=movie']) {
+  for (const route of [
+    '/api/admin/permissions',
+    '/api/admin/catalog',
+    '/api/admin/users',
+    '/api/admin/subscriptions',
+    '/api/admin/payments',
+    '/api/billing',
+    '/api/admin/video-sources',
+    '/api/playback/authorize?tmdbId=12&mediaType=movie'
+  ]) {
     const response = await fetch(`${harness.origin}${route}`);
     assert.equal(response.status, 401);
   }
@@ -426,6 +505,85 @@ test('admin permissions endpoint grants access only after a server-side administ
   assert.equal(response.status, 200);
   assert.equal(payload.isAdmin, true);
   assert.equal(payload.user.id, user.id);
+});
+
+test('user library, watch progress and profile writes are tied to the authenticated user', async (t) => {
+  const harness = await createHarness();
+  t.after(() => harness.close());
+  const csrf = await csrfFor(harness);
+  await register(harness, csrf);
+  const verified = await verifySignup(harness, csrf, 'person@example.com');
+  const user = harness.state.usersByEmail.get('person@example.com');
+  const cookies = { ...csrf.cookies, ...cookieMap(verified) };
+  const post = (route, payload) => fetch(`${harness.origin}${route}`, {
+    method: 'POST',
+    headers: {
+      Origin: harness.origin,
+      'Sec-Fetch-Site': 'same-origin',
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': csrf.token,
+      Cookie: cookieHeader(cookies)
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const libraryResponse = await post('/api/library', {
+    action: 'upsert', mediaType: 'anime', contentId: '42', collection: 'watchlist',
+    user_id: 'attacker-chosen-id', metadata: { title: 'Sample Anime' }
+  });
+  assert.equal(libraryResponse.status, 200);
+  assert.equal(harness.state.databaseWrites[0].table, 'user_library');
+  assert.equal(harness.state.databaseWrites[0].values.user_id, user.id);
+  assert.equal(harness.state.databaseWrites[0].values.media_type, 'anime');
+
+  const historyResponse = await post('/api/watch-history', {
+    mediaType: 'movie', contentId: '19', title: 'Sample Movie',
+    positionSeconds: 30, durationSeconds: 120
+  });
+  assert.equal(historyResponse.status, 200);
+  assert.equal(harness.state.databaseWrites[1].table, 'watch_history');
+  assert.equal(harness.state.databaseWrites[1].values.user_id, user.id);
+
+  const invalidProgress = await post('/api/watch-history', {
+    mediaType: 'movie', contentId: '19', title: 'Sample Movie',
+    positionSeconds: 121, durationSeconds: 120
+  });
+  assert.equal(invalidProgress.status, 400);
+  assert.equal(harness.state.databaseWrites.length, 2);
+
+  const profileResponse = await post('/api/profile', { fullName: 'New Display Name', avatarUrl: null });
+  assert.equal(profileResponse.status, 200);
+  assert.equal((await profileResponse.json()).profile.full_name, 'New Display Name');
+
+  const ownLibrary = await fetch(`${harness.origin}/api/library`, { headers: { Cookie: cookieHeader(cookies) } });
+  assert.equal(ownLibrary.status, 200);
+  const billingResponse = await fetch(`${harness.origin}/api/billing`, { headers: { Cookie: cookieHeader(cookies) } });
+  assert.equal(billingResponse.status, 200);
+  assert.equal((await billingResponse.json()).paymentProcessingEnabled, false);
+  for (const table of ['subscriptions', 'payment_records']) {
+    const query = harness.state.databaseQueries.find((item) => item.table === table);
+    assert.ok(query);
+    assert.deepEqual(query.filters, [['user_id', user.id]]);
+  }
+});
+
+test('admin payment history is denied to ordinary accounts and read-only for authorized admins', async (t) => {
+  const harness = await createHarness();
+  t.after(() => harness.close());
+  const csrf = await csrfFor(harness);
+  await register(harness, csrf);
+  const verified = await verifySignup(harness, csrf, 'person@example.com');
+  const cookies = cookieMap(verified);
+  const denied = await fetch(`${harness.origin}/api/admin/payments`, { headers: { Cookie: cookieHeader(cookies) } });
+  assert.equal(denied.status, 403);
+
+  const user = harness.state.usersByEmail.get('person@example.com');
+  harness.state.adminIds.add(user.id);
+  const allowed = await fetch(`${harness.origin}/api/admin/payments`, { headers: { Cookie: cookieHeader(cookies) } });
+  assert.equal(allowed.status, 200);
+  assert.deepEqual((await allowed.json()).payments, []);
+  const forbiddenWrite = await fetch(`${harness.origin}/api/admin/payments`, { method: 'POST', headers: { Cookie: cookieHeader(cookies) } });
+  assert.equal(forbiddenWrite.status, 405);
 });
 
 test('playback adapter returns only approved HTTPS streams and explicitly permitted downloads', async (t) => {
@@ -477,10 +635,10 @@ test('playback fails closed for unauthorized titles and rejects unapproved provi
   assert.equal((await response.json()).authorized, false);
 });
 
-test('separate catalogue paths serve the app and preserve media-specific client routes', async (t) => {
+test('separate catalogue and account paths serve their dedicated responsive pages', async (t) => {
   const harness = await createHarness();
   t.after(() => harness.close());
-  for (const route of ['/', '/movies', '/series', '/genres/action', '/watchlist']) {
+  for (const route of ['/', '/movies', '/series', '/anime', '/account', '/plans', '/genres/action', '/watchlist']) {
     const response = await fetch(`${harness.origin}${route}`);
     assert.equal(response.status, 200, route);
     assert.match(response.headers.get('content-type'), /text\/html/);
@@ -491,17 +649,62 @@ test('separate catalogue paths serve the app and preserve media-specific client 
   const page = await (await fetch(`${harness.origin}/index.html`)).text();
   assert.match(page, /\/genres\/action/);
   assert.match(page, /data-media-type="tv"/);
+  const anime = await (await fetch(`${harness.origin}/anime`)).text();
+  assert.match(anime, /Anilist catalogue|AniList catalogue/i);
+  assert.match(anime, /\/src\/library-client\.js/);
+  const account = await (await fetch(`${harness.origin}/account`)).text();
+  assert.match(account, /Continue watching/);
 });
 
 test('static assets remain available while server-side files and secrets stay private', async (t) => {
   const harness = await createHarness();
   t.after(() => harness.close());
-  for (const asset of ['/', '/app.js', '/src/catalogue.js', '/src/catalogue-sections.js']) {
+  for (const asset of ['/', '/app.js', '/anime.js', '/sw.js', '/manifest.json', '/mobile-config.js', '/src/api-client.js', '/src/register-service-worker.js', '/src/library-client.js', '/src/catalogue.js', '/src/catalogue-sections.js', '/assets/icons/ziva.svg']) {
     assert.equal((await fetch(`${harness.origin}${asset}`)).status, 200, asset);
   }
-  for (const privatePath of ['/.env', '/.env.local', '/lib/supabase.js', '/server.js', '/supabase/migrations/001_initial_auth_schema.sql']) {
+  for (const privatePath of ['/.env', '/.env.local', '/lib/supabase.js', '/server.js', '/supabase/migrations/001_initial_auth_schema.sql', '/capacitor.config.json', '/scripts/prepare-capacitor.js', '/mobile/www/index.html']) {
     assert.equal((await fetch(`${harness.origin}${privatePath}`)).status, 404, privatePath);
   }
   const app = await (await fetch(`${harness.origin}/app.js`)).text();
   assert.doesNotMatch(app, /SUPABASE_SERVICE_ROLE_KEY|access_token|refresh_token/);
+});
+
+test('AniList API route validates requests and returns normalized metadata', async (t) => {
+  let upstream;
+  const harness = await createHarness({
+    animeFetch: async (url, options) => {
+      upstream = { url, body: JSON.parse(options.body) };
+      return {
+        ok: true,
+        json: async () => ({ data: { Page: {
+          pageInfo: { currentPage: 1, hasNextPage: false },
+          media: [{ id: 8, title: { english: 'ZIVA Anime' }, averageScore: 90, episodes: 12, genres: ['Drama'] }]
+        } } })
+      };
+    }
+  });
+  t.after(() => harness.close());
+  const response = await fetch(`${harness.origin}/api/anime?mode=search&query=space`);
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.items[0].title, 'ZIVA Anime');
+  assert.equal(upstream.body.variables.search, 'space');
+  assert.equal(upstream.url, 'https://graphql.anilist.co');
+
+  const invalid = await fetch(`${harness.origin}/api/anime?mode=delete`);
+  assert.equal(invalid.status, 404);
+  const method = await fetch(`${harness.origin}/api/anime`, { method: 'POST' });
+  assert.equal(method.status, 405);
+});
+
+test('AniList failure surfaces a service error without manufacturing playback availability', async (t) => {
+  const harness = await createHarness({
+    animeFetch: async () => ({ ok: false, status: 503, json: async () => ({}) })
+  });
+  t.after(() => harness.close());
+  const response = await fetch(`${harness.origin}/api/anime?mode=popular`);
+  assert.equal(response.status, 502);
+  const body = await response.json();
+  assert.equal(body.error, 'ANILIST_UPSTREAM_ERROR');
+  assert.match(body.message, /anime data service/);
 });

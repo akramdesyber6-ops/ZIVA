@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#121213">
     <title>ZIVA Admin</title>
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="/admin/styles.css">
   </head>
   <body>
     <div class="admin-shell">
@@ -20,10 +20,10 @@
 
         <nav class="admin-nav" aria-label="Admin navigation">
           <a class="active" href="#overview">Overview</a>
-          <a href="#users">Users</a>
-          <a href="#content">Content</a>
-          <a href="#providers">Providers</a>
-          <a href="#access">Access</a>
+          <a href="#users">Users &amp; roles</a>
+          <a href="#content">Catalogue</a>
+          <a href="#providers">Provider rights</a>
+          <a href="#subscriptions">Subscriptions</a>
         </nav>
       </aside>
 
@@ -51,20 +51,62 @@
           </div>
         </section>
 
-        <section class="panel" id="overview">
-          <div class="panel-heading">
-            <h3>Phase 1 control plane</h3>
-          </div>
-          <ul class="feature-list">
-            <li>Supabase Auth session validation</li>
-            <li>RLS-based profile and roles model</li>
-            <li>Admin-only permission gate</li>
-            <li>Protected playback authorization checks</li>
-          </ul>
-        </section>
+        <div id="admin-content" hidden>
+          <section class="panel admin-panel" id="overview">
+            <div class="panel-heading"><h3>Control center</h3><p>Every write is re-authorized server-side and constrained by Supabase RLS.</p></div>
+            <div class="admin-summary"><article><span>Users</span><strong id="user-count">—</strong></article><article><span>Catalogue entries</span><strong id="catalog-count">—</strong></article><article><span>Rights records</span><strong id="provider-count">—</strong></article></div>
+          </section>
+
+          <section class="panel admin-panel" id="users">
+            <div class="panel-heading"><h3>Users &amp; roles</h3><p>Administrator assignment requires a verified administrator session. The last administrator cannot be removed.</p></div>
+            <div class="admin-table-wrap"><table><thead><tr><th>User</th><th>Roles</th><th>Joined</th><th>Role action</th></tr></thead><tbody id="admin-users"><tr><td colspan="4">Loading users…</td></tr></tbody></table></div>
+            <p class="admin-feedback" id="users-feedback" role="status"></p>
+          </section>
+
+          <section class="panel admin-panel" id="content">
+            <div class="panel-heading"><h3>Catalogue metadata</h3><p>Curated metadata only. External IDs do not authorize or provide video streams.</p></div>
+            <form class="admin-form" id="catalog-form">
+              <label>Media type<select name="mediaType" required><option value="movie">Movie</option><option value="tv">TV Series</option><option value="anime">Anime</option></select></label>
+              <label>External metadata ID<input name="externalId" maxlength="160" required></label>
+              <label>Title<input name="title" maxlength="240" required></label>
+              <label>Release year<input name="releaseYear" type="number" min="1800" max="2200"></label>
+              <label>Genres (comma separated)<input name="genres" maxlength="500"></label>
+              <label>Poster URL<input name="posterUrl" type="url" maxlength="1000"></label>
+              <label>Backdrop URL<input name="backdropUrl" type="url" maxlength="1000"></label>
+              <label class="admin-wide">Description<textarea name="description" rows="3" maxlength="10000"></textarea></label>
+              <label class="admin-check"><input name="isPublished" type="checkbox"> Publish this metadata record</label>
+              <button class="admin-button" type="submit">Save catalogue entry</button>
+            </form>
+            <p class="admin-feedback" id="catalog-feedback" role="status"></p>
+            <div class="admin-table-wrap"><table><thead><tr><th>Title</th><th>Type</th><th>External ID</th><th>Published</th><th></th></tr></thead><tbody id="admin-catalog"><tr><td colspan="5">Loading catalogue…</td></tr></tbody></table></div>
+          </section>
+
+          <section class="panel admin-panel" id="providers">
+            <div class="panel-heading"><h3>Authorised provider rights</h3><p>Store provider asset IDs and rights references only. No stream URLs are stored here. Mark records approved only after verifying distribution rights.</p></div>
+            <form class="admin-form" id="provider-form">
+              <label>Catalogue entry UUID<input name="catalogEntryId" required pattern="[0-9a-fA-F-]{36}"></label>
+              <label>Provider name<input name="providerName" required maxlength="120"></label>
+              <label>Provider asset ID<input name="providerAssetId" required maxlength="240"></label>
+              <label>Rights evidence reference<input name="rightsReference" required maxlength="500"></label>
+              <label>Rights expiry<input name="rightsExpiresAt" type="datetime-local"></label>
+              <label>Status<select name="status"><option value="pending">Pending review</option><option value="approved">Approved (verified rights)</option><option value="expired">Expired</option><option value="revoked">Revoked</option></select></label>
+              <button class="admin-button" type="submit">Save rights record</button>
+            </form>
+            <p class="admin-feedback" id="provider-feedback" role="status"></p>
+            <div class="admin-table-wrap"><table><thead><tr><th>Provider</th><th>Asset ID</th><th>Rights expiry</th><th>Status</th></tr></thead><tbody id="admin-providers"><tr><td colspan="4">Loading provider records…</td></tr></tbody></table></div>
+          </section>
+
+          <section class="panel admin-panel" id="subscriptions">
+            <div class="panel-heading"><h3>Subscriptions &amp; payments</h3><p>Subscription records are informational. No payment processor is configured, and no transaction is processed.</p></div>
+            <div class="admin-table-wrap"><table><thead><tr><th>User ID</th><th>Plan</th><th>Status</th><th>Period end</th></tr></thead><tbody id="admin-subscriptions"><tr><td colspan="4">Loading subscription records…</td></tr></tbody></table></div>
+            <h4>Payment history</h4>
+            <div class="admin-table-wrap"><table><thead><tr><th>User ID</th><th>Provider</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody id="admin-payments"><tr><td colspan="5">Loading payment records…</td></tr></tbody></table></div>
+          </section>
+          <p class="admin-feedback" id="admin-global-feedback" role="status"></p>
+        </div>
       </main>
     </div>
 
-    <script src="./app.js" defer></script>
+    <script src="/admin/app.js" defer></script>
   </body>
 </html>

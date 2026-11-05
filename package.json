@@ -6,12 +6,28 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node scripts/validate-static.js",
+    "mobile:prepare": "node scripts/prepare-capacitor.js",
+    "android:add": "npm run mobile:prepare && npx cap add android",
+    "android:sync": "npm run mobile:prepare && npx cap sync android",
+    "android:build": "node scripts/build-android.js",
+    "ios:add": "npm run mobile:prepare && npx cap add ios && node scripts/generate-platform-assets.js && npx cap sync ios",
+    "ios:sync": "npm run mobile:prepare && node scripts/generate-platform-assets.js && npx cap sync ios",
+    "ios:open": "npx cap open ios",
+    "mobile:assets": "node scripts/generate-platform-assets.js"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
+    "@capacitor/splash-screen": "^8.0.0",
     "@supabase/supabase-js": "^2.118.0"
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0"
   }
 }

@@ -20,6 +20,7 @@ const demoMovies = [
 const $ = (selector) => document.querySelector(selector);
 const watchlistKey = 'ziva-watchlist';
 const legacyWatchlistKey = 'justwatch-demo-watchlist';
+const favoritesKey = 'ziva-favorites';
 
 let searchTerm = '';
 let currentMovie = null;
@@ -28,6 +29,7 @@ let searchResults = null;
 let searchTimer = null;
 let searchError = '';
 let watchlist = loadWatchlist();
+let favorites = loadLocalCollection(favoritesKey);
 let authMode = 'login';
 let authStep = 'request';
 let loginMethod = 'password';
@@ -48,6 +50,10 @@ let searchTotalPages = 1;
 let searchLoading = false;
 let catalogueGenres = [];
 let movieRequestId = 0;
+let lastProgressSavedAt = 0;
+let progressSavePending = false;
+let progressRestoreFor = '';
+let progressSyncWarningShown = false;
 
 const knownMovies = new Map();
 
@@ -86,6 +92,23 @@ function loadWatchlist() {
   }
 }
 
+function loadLocalCollection(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(value) ? [...new Set(value.filter((id) => typeof id === 'string'))] : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalCollection(key, values) {
+  try {
+    localStorage.setItem(key, JSON.stringify(values));
+  } catch {
+    showToast('Browser storage is unavailable in this session.');
+  }
+}
+
 function saveWatchlist() {
   try {
     localStorage.setItem(watchlistKey, JSON.stringify(watchlist));
@@ -94,6 +117,42 @@ function saveWatchlist() {
   }
 
   updateWatchlistCount();
+}
+
+function syncLibraryItem(movie, action, collection = 'watchlist') {
+  if (!authUser || !window.ZivaLibrary || !movie) return;
+  const mediaType = movie.tmdbType || (movie.id.startsWith('tmdb-tv-') ? 'tv' : 'movie');
+  window.ZivaLibrary.save({
+    mediaType,
+    contentId: movie.id,
+    metadata: {
+      title: movie.title,
+      year: Number(movie.year) || null,
+      image: movie.image || ''
+    }
+  }, action, collection).catch(() => {
+    showToast('Saved on this device. Cloud library sync is temporarily unavailable.');
+  });
+}
+
+async function syncLocalWatchlist() {
+  if (!authUser || !window.ZivaLibrary) return;
+  const localItems = watchlist.map((id) => knownMovies.get(id)).filter(Boolean);
+  for (const movie of localItems) {
+    await window.ZivaLibrary.save({
+      mediaType: movie.tmdbType || (movie.id.startsWith('tmdb-tv-') ? 'tv' : 'movie'),
+      contentId: movie.id,
+      metadata: { title: movie.title, year: Number(movie.year) || null, image: movie.image || '' }
+    });
+  }
+  const localFavorites = favorites.map((id) => knownMovies.get(id)).filter(Boolean);
+  for (const movie of localFavorites) {
+    await window.ZivaLibrary.save({
+      mediaType: movie.tmdbType || (movie.id.startsWith('tmdb-tv-') ? 'tv' : 'movie'),
+      contentId: movie.id,
+      metadata: { title: movie.title, year: Number(movie.year) || null, image: movie.image || '' }
+    }, 'upsert', 'favorite');
+  }
 }
 
 function updateWatchlistCount() {
@@ -123,6 +182,7 @@ function safeImageUrl(value) {
 
 function makeCard(movie) {
   const saved = watchlist.includes(movie.id);
+  const favorite = favorites.includes(movie.id);
 
   return `
     <article class="movie-card"
@@ -145,6 +205,7 @@ function makeCard(movie) {
             title="${saved ? 'Remove from' : 'Add to'} my list">
             ${saved ? '✓' : '+'}
           </button>
+          <button class="favorite-button ${favorite ? 'saved' : ''}" type="button" data-favorite="${escapeHtml(movie.id)}" aria-label="${favorite ? 'Remove from' : 'Add to'} favourites" title="${favorite ? 'Remove from' : 'Add to'} favourites">♥</button>
         </div>
 
         <span class="poster-label">${escapeHtml(movie.type)}</span>
@@ -429,6 +490,9 @@ async function restoreAuthSession() {
     const payload = await response.json().catch(() => ({}));
     if (payload.csrfToken) csrfToken = payload.csrfToken;
     updateAuthUi(response.ok && payload.authenticated ? payload.user : null);
+    if (response.ok && payload.authenticated) {
+      syncLocalWatchlist().catch(() => showToast('Some items are still only saved on this device.'));
+    }
   } catch {
     updateAuthUi(null);
   }
@@ -509,6 +573,7 @@ async function submitAuth(event) {
       message.textContent = payload.message || 'If an account exists for this address, a code has been sent.';
     } else if (payload.authenticated && payload.user) {
       updateAuthUi(payload.user);
+      syncLocalWatchlist().catch(() => showToast('Some items are still only saved on this device.'));
       $('#auth-dialog').close();
       $('#auth-form').reset();
       showToast(`Welcome${payload.user.fullName ? `, ${payload.user.fullName}` : ' to ZIVA'}.`);
@@ -599,6 +664,8 @@ function openMovie(movie) {
   if (!movie) return;
 
   currentMovie = movie;
+  lastProgressSavedAt = 0;
+  progressRestoreFor = '';
   const requestId = ++movieRequestId;
   const mediaType = movie.tmdbType || (movie.id.startsWith('tmdb-tv-') ? 'tv' : 'movie');
   const tmdbId = movie.tmdbId || Number(String(movie.id).replace(/^tmdb-(movie|tv)-/, ''));
@@ -629,6 +696,7 @@ function openMovie(movie) {
   $('#dialog-save').textContent = watchlist.includes(movie.id)
     ? '✓ In my list'
     : '＋ Add to my list';
+  $('#dialog-favorite').textContent = favorites.includes(movie.id) ? '♥ In favourites' : '♡ Add to favourites';
   $('#dialog-trailer').hidden = true;
   $('#dialog-providers').textContent = 'Checking official streaming availability…';
   $('#playback-status').textContent = 'Playback availability is checked when you choose Play.';
@@ -719,10 +787,61 @@ function clearPlayer() {
     activeHlsPlayer = null;
   }
   const video = $('#movie-player');
+  delete video.dataset.contentId;
   video.pause();
   video.removeAttribute('src');
   video.load();
   $('#video-frame').hidden = true;
+}
+
+async function restorePlaybackProgress() {
+  const video = $('#movie-player');
+  const contentId = currentMovie && currentMovie.id;
+  if (!authUser || !window.ZivaLibrary || !contentId || video.dataset.contentId !== contentId || progressRestoreFor === contentId) return;
+  progressRestoreFor = contentId;
+  try {
+    const library = await window.ZivaLibrary.getLibrary();
+    const history = (library.history || []).find((item) => item.content_id === contentId);
+    if (history && history.position_seconds > 0 && video.duration > history.position_seconds + 5
+        && currentMovie && currentMovie.id === contentId && video.dataset.contentId === contentId) {
+      video.currentTime = history.position_seconds;
+      $('#playback-status').textContent = `Resuming from ${Math.floor(history.position_seconds / 60)} min.`;
+    }
+  } catch {
+    if (!progressSyncWarningShown) {
+      showToast('Playback progress sync is unavailable until your library is configured.');
+      progressSyncWarningShown = true;
+    }
+  }
+}
+
+async function savePlaybackProgress(force = false) {
+  const video = $('#movie-player');
+  const movie = currentMovie;
+  const contentId = movie && movie.id;
+  if (!authUser || !window.ZivaLibrary || !contentId || video.dataset.contentId !== contentId
+      || progressSavePending || !Number.isFinite(video.duration) || video.duration <= 0
+      || (!force && Date.now() - lastProgressSavedAt < 15000)) return;
+  const positionSeconds = Math.min(Math.floor(video.currentTime), Math.floor(video.duration));
+  if (positionSeconds <= 0) return;
+  progressSavePending = true;
+  lastProgressSavedAt = Date.now();
+  try {
+    await window.ZivaLibrary.recordProgress({
+      mediaType: movie.tmdbType || 'movie',
+      contentId,
+      title: movie.title,
+      positionSeconds,
+      durationSeconds: Math.floor(video.duration)
+    });
+  } catch {
+    if (!progressSyncWarningShown) {
+      showToast('Playback is working, but watch history could not be synchronized.');
+      progressSyncWarningShown = true;
+    }
+  } finally {
+    progressSavePending = false;
+  }
 }
 
 async function requestMoviePlayback() {
@@ -759,6 +878,7 @@ async function requestMoviePlayback() {
     }
     const video = $('#movie-player');
     $('#video-frame').hidden = false;
+    video.dataset.contentId = currentMovie.id;
     if (streamType.toLowerCase().includes('mpegurl') && !video.canPlayType(streamType)) {
       if (window.Hls && window.Hls.isSupported()) {
         activeHlsPlayer = new window.Hls();
@@ -793,6 +913,11 @@ async function requestMoviePlayback() {
     button.textContent = 'Play title';
   }
 }
+
+$('#movie-player').addEventListener('loadedmetadata', restorePlaybackProgress);
+$('#movie-player').addEventListener('timeupdate', () => savePlaybackProgress());
+$('#movie-player').addEventListener('pause', () => savePlaybackProgress(true));
+$('#movie-player').addEventListener('ended', () => savePlaybackProgress(true));
 
 function safeExternalUrl(value) {
   try {
@@ -842,7 +967,8 @@ function toggleWatchlist(id) {
   const movie = knownMovies.get(id);
   if (!movie) return;
 
-  if (watchlist.includes(id)) {
+  const removing = watchlist.includes(id);
+  if (removing) {
     watchlist = watchlist.filter((item) => item !== id);
     showToast(`Removed ${movie.title} from your list.`);
   } else {
@@ -851,6 +977,7 @@ function toggleWatchlist(id) {
   }
 
   saveWatchlist();
+  syncLibraryItem(movie, removing ? 'remove' : 'upsert');
   render();
 
   if (currentMovie?.id === id) {
@@ -858,6 +985,19 @@ function toggleWatchlist(id) {
       ? '✓ In my list'
       : '＋ Add to my list';
   }
+}
+
+function toggleFavorite(id) {
+  const movie = knownMovies.get(id);
+  if (!movie) return;
+  const removing = favorites.includes(id);
+  favorites = removing ? favorites.filter((item) => item !== id) : [...favorites, id];
+  saveLocalCollection(favoritesKey, favorites);
+  syncLibraryItem(movie, removing ? 'remove' : 'upsert', 'favorite');
+  if (currentMovie && currentMovie.id === id) {
+    $('#dialog-favorite').textContent = favorites.includes(id) ? '♥ In favourites' : '♡ Add to favourites';
+  }
+  render();
 }
 
 async function restoreSavedTmdbTitles() {
@@ -1089,6 +1229,13 @@ document.addEventListener('click', (event) => {
     return;
   }
 
+  const favoriteButton = event.target.closest('[data-favorite]');
+  if (favoriteButton) {
+    event.stopPropagation();
+    toggleFavorite(favoriteButton.dataset.favorite);
+    return;
+  }
+
   const card = event.target.closest('[data-movie-id]');
 
   if (card) {
@@ -1158,12 +1305,15 @@ $('#search-input').addEventListener('input', (event) => {
 });
 
 $('#menu-toggle').addEventListener('click', () => {
-  $('#navigation').classList.toggle('open');
+  const expanded = $('#menu-toggle').getAttribute('aria-expanded') === 'true';
+  $('#navigation').classList.toggle('open', !expanded);
+  $('#menu-toggle').setAttribute('aria-expanded', String(!expanded));
 });
 
 $('#navigation').addEventListener('click', (event) => {
   if (event.target.closest('a')) {
     $('#navigation').classList.remove('open');
+    $('#menu-toggle').setAttribute('aria-expanded', 'false');
   }
 });
 
@@ -1229,6 +1379,10 @@ $('#dialog-save').addEventListener('click', () => {
   if (currentMovie) {
     toggleWatchlist(currentMovie.id);
   }
+});
+
+$('#dialog-favorite').addEventListener('click', () => {
+  if (currentMovie) toggleFavorite(currentMovie.id);
 });
 
 $('#dialog-share').addEventListener('click', shareMovie);
@@ -1317,3 +1471,5 @@ window.addEventListener('popstate', () => {
 render();
 initializeCatalogue();
 restoreAuthSession();
+const requestedAuthMode = new URLSearchParams(window.location.search).get('auth');
+if (requestedAuthMode === 'login' || requestedAuthMode === 'register') openAuthDialog(requestedAuthMode);

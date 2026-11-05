@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#121213">
+    <meta name="description" content="Manage your ZIVA profile, watchlist and viewing history.">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/assets/icons/ziva.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <title>Your account · ZIVA</title>
+  </head>
+  <body class="account-page">
+    <header class="topbar">
+      <a class="brand" href="/">ZI<span>VA</span></a>
+      <nav class="nav" aria-label="Main navigation">
+        <a href="/">Discover</a><a href="/movies">Movies</a><a href="/series">Series</a><a href="/anime">Anime</a>
+      </nav>
+      <div class="top-actions"><button class="ghost-button" id="account-sign-out" type="button" hidden>Sign out</button><a class="ghost-button" href="/">Back to ZIVA</a></div>
+    </header>
+    <main>
+      <section class="page-heading account-heading">
+        <p class="section-kicker">YOUR ZIVA SPACE</p>
+        <h1>Account &amp; library</h1>
+        <p>Manage your profile and pick up where you left off.</p>
+      </section>
+      <section class="account-layout">
+        <aside class="account-sidebar">
+          <a href="#profile">Profile</a><a href="#library">My List &amp; favourites</a><a href="#history">Continue watching &amp; history</a><a href="/plans">Plans</a>
+        </aside>
+        <div class="account-main">
+          <section class="panel account-panel" id="account-access">
+            <p class="section-kicker">ACCOUNT ACCESS</p>
+            <h2 id="account-status">Checking your session…</h2>
+            <p id="account-message" role="status">Your private library is available after you sign in.</p>
+            <a class="primary-button" id="account-login" href="/?auth=login" hidden>Sign in to your account <span>→</span></a>
+          </section>
+          <section class="panel account-panel" id="profile" hidden>
+            <p class="section-kicker">PROFILE</p><h2>Personal details</h2>
+            <form id="profile-form" class="account-form">
+              <label>Display name<input id="profile-name" name="fullName" minlength="2" maxlength="80" required></label>
+              <label>Email<input id="profile-email" name="email" type="email" readonly></label>
+              <label>Profile image URL<input id="profile-avatar" name="avatarUrl" type="url" inputmode="url" placeholder="https://…"></label>
+              <button class="primary-button" type="submit">Save profile</button>
+            </form>
+          </section>
+          <section class="panel account-panel" id="library" hidden>
+            <p class="section-kicker">YOUR COLLECTION</p><h2>My List &amp; favourites</h2>
+            <div class="account-library" id="account-library"><p class="empty-state">Your library is empty.</p></div>
+          </section>
+          <section class="panel account-panel" id="history" hidden>
+            <p class="section-kicker">KEEP WATCHING</p><h2>Continue watching</h2>
+            <div class="account-library" id="continue-watching"><p class="empty-state">No playback progress is saved yet.</p></div>
+            <h2 class="account-subheading">Watch history</h2>
+            <div class="account-library" id="watch-history"><p class="empty-state">No watch history yet.</p></div>
+          </section>
+          <section class="panel account-panel" id="billing" hidden>
+            <p class="section-kicker">SUBSCRIPTION</p><h2 id="billing-plan">Free plan</h2>
+            <p id="billing-status">No paid plan is active. Payment processing is not configured.</p>
+            <div class="account-library" id="payment-history"><p class="empty-state">No payment history.</p></div>
+            <a class="text-link" href="/plans">View plan information →</a>
+          </section>
+        </div>
+      </section>
+    </main>
+    <footer class="footer"><a class="brand" href="/">ZI<span>VA</span></a><p>LIGHT UP YOUR SCREEN</p><small>© 2026 ZIVA · LIGHT UP YOUR SCREEN</small></footer>
+    <script src="/mobile-config.js" defer></script>
+    <script src="/src/api-client.js" defer></script>
+    <script src="/src/register-service-worker.js" defer></script>
+    <script src="/account.js" defer></script>
+  </body>
+</html>
