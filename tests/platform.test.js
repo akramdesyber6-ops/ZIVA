@@ -8,6 +8,24 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 
+function restoreAuthSessionWith(fetchImpl, initialUser) {
+  const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const match = source.match(/async function restoreAuthSession\(\) \{[\s\S]*?\n\}/);
+  assert.ok(match, 'restoreAuthSession() should exist in app.js');
+  const state = { user: initialUser, updates: [], warnings: [] };
+  const context = {
+    fetch: fetchImpl,
+    csrfToken: '',
+    updateAuthUi(user) {
+      state.user = user;
+      state.updates.push(user);
+    },
+    syncLocalWatchlist: async () => {},
+    showToast: (message) => state.warnings.push(message)
+  };
+  return vm.runInNewContext(`${match[0]}\nrestoreAuthSession();`, context).then(() => state);
+}
+
 test('PWA manifest and offline shell contain installable brand identity', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   assert.equal(manifest.short_name, 'ZIVA');
@@ -88,13 +106,166 @@ test('native API client rewrites only same-origin API requests to the configured
       return { ok: true };
     }
   };
-  vm.runInNewContext(script, { window, URL });
+  vm.runInNewContext(script, { window, URL, AbortController, setTimeout, clearTimeout });
   await window.fetch('/api/auth/session', { credentials: 'include' });
   assert.equal(String(requests[0][0]), 'https://api.ziva.example/api/auth/session');
   assert.equal(requests[0][1].credentials, 'include');
+  assert.ok(requests[0][1].signal instanceof AbortSignal);
+  const libraryUrl = window.zivaApiUrl('/api/library');
+  await window.fetch(libraryUrl);
+  assert.equal(String(requests[1][0]), 'https://api.ziva.example/api/library');
+  assert.equal(requests[1][1].credentials, 'include');
+  assert.ok(requests[1][1].signal instanceof AbortSignal);
   await window.fetch('https://cdn.example.com/library.js');
-  assert.equal(requests[1][0], 'https://cdn.example.com/library.js');
+  assert.equal(requests[2][0], 'https://cdn.example.com/library.js');
+  assert.equal(requests[2][1].signal, undefined);
+  assert.equal(requests[2][1].credentials, undefined);
   assert.equal(window.zivaApiUrl('/api/library').origin, 'https://api.ziva.example');
+});
+
+test('same-origin API requests have a timeout and report network failures clearly', async () => {
+  const script = fs.readFileSync(path.join(root, 'src', 'api-client.js'), 'utf8');
+  let timeoutCallback;
+  const window = {
+    location: { origin: 'https://ziva.example' },
+    fetch: async (_input, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new TypeError('aborted')));
+    })
+  };
+  vm.runInNewContext(script, {
+    window,
+    URL,
+    AbortController,
+    setTimeout: (callback) => {
+      timeoutCallback = callback;
+      return 1;
+    },
+    clearTimeout: () => {}
+  });
+  const timedOutRequest = window.fetch('/api/library');
+  timeoutCallback();
+  await assert.rejects(timedOutRequest, /could not reach the server in time/);
+
+  const networkWindow = {
+    location: { origin: 'https://ziva.example' },
+    fetch: async () => { throw new TypeError('network failure'); }
+  };
+  vm.runInNewContext(script, { window: networkWindow, URL, AbortController, setTimeout, clearTimeout });
+
+  await assert.rejects(
+    networkWindow.fetch('/api/library'),
+    /ZIVA is temporarily unreachable/
+  );
+});
+
+test('absolute configured API requests time out and preserve caller cancellation', async () => {
+  const script = fs.readFileSync(path.join(root, 'src', 'api-client.js'), 'utf8');
+  let timeoutCallback;
+  const window = {
+    location: { origin: 'https://localhost' },
+    ZIVA_CONFIG: { apiBaseUrl: 'https://api.ziva.example' },
+    fetch: async (_input, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason));
+    })
+  };
+  vm.runInNewContext(script, {
+    window,
+    URL,
+    AbortController,
+    setTimeout: (callback) => {
+      timeoutCallback = callback;
+      return 1;
+    },
+    clearTimeout: () => {}
+  });
+
+  const timedOutRequest = window.fetch(window.zivaApiUrl('/api/library'));
+  timeoutCallback();
+  await assert.rejects(timedOutRequest, /could not reach the server in time/);
+
+  const cancellation = new AbortController();
+  const cancellationError = new Error('caller cancelled');
+  const cancelledRequest = window.fetch(window.zivaApiUrl('/api/library'), { signal: cancellation.signal });
+  cancellation.abort(cancellationError);
+  await assert.rejects(cancelledRequest, (error) => {
+    assert.equal(error, cancellationError);
+    assert.doesNotMatch(error.message, /temporarily unreachable|could not reach the server in time/);
+    return true;
+  });
+});
+
+test('invalid API origins are rejected safely', () => {
+  const script = fs.readFileSync(path.join(root, 'src', 'api-client.js'), 'utf8');
+  const window = {
+    location: { origin: 'https://localhost' },
+    ZIVA_CONFIG: { apiBaseUrl: 'https://api.ziva.example/private' },
+    fetch: async () => ({ ok: true })
+  };
+  assert.throws(() => vm.runInNewContext(script, { window, URL, AbortController, setTimeout, clearTimeout }), /absolute HTTPS origin/);
+});
+
+test('session restoration preserves authenticated UI on HTTP 503 and 429', async () => {
+  const existingUser = { email: 'person@example.com' };
+  for (const status of [503, 429]) {
+    const state = await restoreAuthSessionWith(async () => ({
+      ok: false,
+      status,
+      json: async () => ({ error: status === 503 ? 'SUPABASE_UNAVAILABLE' : 'RATE_LIMITED' })
+    }), existingUser);
+    assert.equal(state.user, existingUser);
+    assert.deepEqual(state.updates, []);
+    assert.equal(state.warnings.length, 1);
+    assert.match(state.warnings[0], /temporarily unavailable/);
+    assert.match(state.warnings[0], /sign-in status has not been changed/);
+  }
+});
+
+test('session restoration preserves authenticated UI on network failures', async () => {
+  const existingUser = { email: 'person@example.com' };
+  const state = await restoreAuthSessionWith(async () => {
+    throw new TypeError('network failure');
+  }, existingUser);
+  assert.equal(state.user, existingUser);
+  assert.deepEqual(state.updates, []);
+  assert.equal(state.warnings.length, 1);
+  assert.match(state.warnings[0], /connection/);
+  assert.match(state.warnings[0], /sign-in status has not been changed/);
+});
+
+test('session restoration updates the UI only for confirmed authenticated or guest responses', async () => {
+  const authenticatedUser = { email: 'person@example.com' };
+  const authenticated = await restoreAuthSessionWith(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ authenticated: true, user: authenticatedUser })
+  }), null);
+  assert.equal(authenticated.user, authenticatedUser);
+  assert.deepEqual(authenticated.updates, [authenticatedUser]);
+  assert.deepEqual(authenticated.warnings, []);
+
+  for (const response of [
+    { ok: true, status: 200, json: async () => ({ authenticated: false }) },
+    { ok: false, status: 401, json: async () => ({ authenticated: false }) },
+    { ok: false, status: 403, json: async () => ({ authenticated: false }) }
+  ]) {
+    const state = await restoreAuthSessionWith(async () => response, authenticatedUser);
+    assert.equal(state.user, null);
+    assert.deepEqual(state.updates, [null]);
+    assert.deepEqual(state.warnings, []);
+  }
+});
+
+test('unexpected session responses preserve authenticated UI state', async () => {
+  const existingUser = { email: 'person@example.com' };
+  const state = await restoreAuthSessionWith(async () => ({
+    ok: false,
+    status: 400,
+    json: async () => ({ error: 'BAD_REQUEST' })
+  }), existingUser);
+  assert.equal(state.user, existingUser);
+  assert.deepEqual(state.updates, []);
+  assert.equal(state.warnings.length, 1);
+  assert.match(state.warnings[0], /could not confirm your session/);
 });
 
 test('responsive web layout defines mobile breakpoints and visible keyboard focus', () => {
@@ -123,6 +294,7 @@ test('admin page uses absolute dashboard asset paths from both admin route forms
   const page = fs.readFileSync(path.join(root, 'admin', 'index.html'), 'utf8');
   assert.match(page, /href="\/admin\/styles\.css"/);
   assert.match(page, /src="\/admin\/app\.js"/);
+  assert.match(page, /src="\/src\/api-client\.js"/);
 });
 
 test('library migration adds user-scoped RLS without redefining initial auth objects', () => {

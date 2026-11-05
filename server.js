@@ -9,6 +9,7 @@ const {
   createSupabaseServerClient,
   getAuthenticatedUser,
   ensureAdmin,
+  isTransientAuthError,
   validateEmail,
   validatePassword,
   validateDisplayName,
@@ -208,6 +209,7 @@ async function handleRegister(req, res, env, clientFactory) {
       const code = String(error.code || '').toLowerCase();
       const message = String(error.message || '').toLowerCase();
       if (error.status === 429) return sendJson(res, 429, { error: 'OTP_RATE_LIMITED', message: 'Too many code requests. Please wait before trying again.' });
+      if (isTransientAuthError(error)) return sendJson(res, 503, { error: 'AUTH_UNAVAILABLE', message: 'Registration is temporarily unavailable.' });
       if (/weak_password|password.*(weak|short|characters)/.test(`${code} ${message}`)) {
         return sendJson(res, 400, { error: 'WEAK_PASSWORD', message: 'Use a stronger password with at least 8 characters.' });
       }
@@ -273,6 +275,7 @@ async function handleLogin(req, res, env, clientFactory) {
     }
 
     if (error) {
+      if (isTransientAuthError(error)) return sendJson(res, 503, { error: 'AUTH_UNAVAILABLE', message: 'Sign in is temporarily unavailable.' });
       const code = String(error.code || '').toLowerCase();
       if (/email_not_confirmed|email.*not.*confirmed/.test(`${code} ${error.message || ''}`.toLowerCase())) {
         return sendJson(res, 403, { error: 'EMAIL_NOT_VERIFIED', message: 'Verify your email first, or request a sign-in code.' });
@@ -282,9 +285,8 @@ async function handleLogin(req, res, env, clientFactory) {
 
     const session = data && data.session;
     if (!session) return sendJson(res, 401, { error: 'INVALID_CREDENTIALS', message: 'Email or password is incorrect.' });
-    const verified = await client.auth.getUser(session.access_token);
-    const user = verified.data && verified.data.user;
-    if (verified.error || !user || !(user.email_confirmed_at || user.confirmed_at)) {
+    const user = data && data.user;
+    if (!user || !(user.email_confirmed_at || user.confirmed_at)) {
       return sendJson(res, 403, { error: 'EMAIL_NOT_VERIFIED', message: 'Verify your email before signing in.' });
     }
     if (!setSessionCookies(res, session, env)) {
@@ -343,6 +345,7 @@ async function handleResendSignupCode(req, res, env, clientFactory) {
   try {
     const { error } = await client.auth.resend({ type: 'signup', email });
     if (error && error.status === 429) return sendJson(res, 429, { error: 'OTP_RATE_LIMITED', message: 'Too many code requests. Please wait before trying again.' });
+    if (isTransientAuthError(error)) return sendJson(res, 503, { error: 'OTP_UNAVAILABLE', message: 'Unable to resend the verification code right now.' });
     if (error) return sendJson(res, 400, { error: 'OTP_RESEND_FAILED', message: 'Unable to resend the verification code. Request a new registration or try again later.' });
     return sendJson(res, 200, { codeSent: true, message: 'A new verification code has been sent if the account is awaiting confirmation.' });
   } catch {
@@ -380,15 +383,15 @@ async function handleVerifyOtp(req, res, env, clientFactory) {
       if (error && error.status === 429) {
         return sendJson(res, 429, { error: 'OTP_RATE_LIMITED', message: 'Too many verification attempts. Request a new code and try later.' });
       }
+      if (isTransientAuthError(error)) return sendJson(res, 503, { error: 'AUTH_UNAVAILABLE', message: 'Email verification is temporarily unavailable.' });
       return sendJson(res, 400, {
         error: 'OTP_INVALID_OR_EXPIRED',
         message: 'That code is invalid or expired. Request a new code and try again.'
       });
     }
 
-    const verified = await client.auth.getUser(session.access_token);
-    const user = verified.data && verified.data.user;
-    if (verified.error || !user || !(user.email_confirmed_at || user.confirmed_at)) {
+    const user = data && data.user;
+    if (!user || !(user.email_confirmed_at || user.confirmed_at)) {
       return sendJson(res, 403, {
         error: 'EMAIL_NOT_VERIFIED',
         message: 'Email verification could not be confirmed. Request a new code and try again.'
@@ -451,6 +454,14 @@ async function handleSession(req, res, env, clientFactory) {
 
 async function handleLogout(req, res, env, clientFactory) {
   const auth = await getAuthenticatedUser(req, env, { clientFactory });
+  if (!auth.ok && auth.status >= 500) {
+    clearSessionCookies(res, env);
+    ensureCsrfCookie(req, res, env);
+    return sendJson(res, 503, {
+      error: 'LOGOUT_UNCONFIRMED',
+      message: 'Your browser session was cleared, but sign-out could not be confirmed. Reconnect and try again.'
+    });
+  }
 
   try {
     if (auth.ok) {

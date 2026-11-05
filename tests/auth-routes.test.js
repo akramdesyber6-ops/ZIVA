@@ -84,17 +84,20 @@ function createFakeSupabase(state) {
         return { data: { user, session }, error: null };
       },
       getUser: async (accessToken) => {
+        if (state.getUserError) return { data: { user: null }, error: state.getUserError };
         const user = state.usersByToken.get(accessToken);
         return user
           ? { data: { user }, error: null }
           : { data: { user: null }, error: { status: 401 } };
       },
       refreshSession: async ({ refresh_token: refreshToken }) => {
+        state.refreshCalls += 1;
+        if (state.refreshError) return { data: { session: null }, error: state.refreshError };
         const saved = state.sessionsByRefresh.get(refreshToken);
         if (!saved) return { data: { session: null }, error: { status: 401 } };
         const session = makeSession(saved.user);
         state.sessionsByRefresh.delete(refreshToken);
-        return { data: { session }, error: null };
+        return { data: { session, user: saved.user }, error: null };
       },
       setSession: async (session) => {
         state.sessionSet = session;
@@ -102,6 +105,7 @@ function createFakeSupabase(state) {
       },
       signOut: async (options) => {
         state.signOutScope = options.scope;
+        state.signOutCalls.push(options);
         return { error: null };
       }
     },
@@ -159,8 +163,12 @@ async function createHarness(options = {}) {
     nextUser: 1,
     nextToken: 1,
     rateLimited: Boolean(options.rateLimited),
+    getUserError: null,
+    refreshError: null,
+    refreshCalls: 0,
     sessionSet: null,
     signOutScope: null,
+    signOutCalls: [],
     databaseWrites: [],
     databaseDeletes: [],
     databaseQueries: []
@@ -391,6 +399,63 @@ test('session restoration refreshes valid sessions and clears invalid cookies', 
   assert.match(invalid.headers.get('set-cookie'), /ziva_access=; Path=\/; Max-Age=0/);
 });
 
+test('session restoration refreshes when the access cookie has expired or is missing', async (t) => {
+  const harness = await createHarness();
+  t.after(() => harness.close());
+  const csrf = await csrfFor(harness);
+  await register(harness, csrf);
+  const verified = await verifySignup(harness, csrf, 'person@example.com');
+  const originalCookies = cookieMap(verified);
+
+  const expiredAccess = await fetch(`${harness.origin}/api/auth/session`, {
+    headers: { Cookie: cookieHeader({ ...originalCookies, ziva_access: 'expired-access-token' }) }
+  });
+  assert.equal(expiredAccess.status, 200);
+  assert.equal((await expiredAccess.json()).authenticated, true);
+  const expiredAccessCookies = cookieMap(expiredAccess);
+  assert.ok(expiredAccessCookies.ziva_access);
+  assert.ok(expiredAccessCookies.ziva_refresh);
+  assert.notEqual(expiredAccessCookies.ziva_refresh, originalCookies.ziva_refresh);
+
+  const missingAccess = await fetch(`${harness.origin}/api/auth/session`, {
+    headers: { Cookie: cookieHeader({ ziva_refresh: expiredAccessCookies.ziva_refresh }) }
+  });
+  assert.equal(missingAccess.status, 200);
+  assert.equal((await missingAccess.json()).authenticated, true);
+  const missingAccessCookies = cookieMap(missingAccess);
+  assert.ok(missingAccessCookies.ziva_access);
+  assert.ok(missingAccessCookies.ziva_refresh);
+  assert.notEqual(missingAccessCookies.ziva_refresh, expiredAccessCookies.ziva_refresh);
+  assert.equal(harness.state.refreshCalls, 2);
+});
+
+test('transient Auth failures preserve session cookies and do not masquerade as expiry', async (t) => {
+  const harness = await createHarness();
+  t.after(() => harness.close());
+  const csrf = await csrfFor(harness);
+  await register(harness, csrf);
+  const verified = await verifySignup(harness, csrf, 'person@example.com');
+  const cookies = cookieMap(verified);
+
+  harness.state.getUserError = { status: 503 };
+  const unavailable = await fetch(`${harness.origin}/api/auth/session`, {
+    headers: { Cookie: cookieHeader(cookies) }
+  });
+  assert.equal(unavailable.status, 503);
+  assert.equal((await unavailable.json()).error, 'SUPABASE_UNAVAILABLE');
+  assert.doesNotMatch(unavailable.headers.get('set-cookie') || '', /ziva_access=;.*Max-Age=0/);
+  assert.equal(harness.state.refreshCalls, 0);
+
+  harness.state.getUserError = null;
+  harness.state.refreshError = { status: 503 };
+  const refreshUnavailable = await fetch(`${harness.origin}/api/auth/session`, {
+    headers: { Cookie: cookieHeader({ ...cookies, ziva_access: 'expired-access-token' }) }
+  });
+  assert.equal(refreshUnavailable.status, 503);
+  assert.equal((await refreshUnavailable.json()).error, 'SUPABASE_UNAVAILABLE');
+  assert.doesNotMatch(refreshUnavailable.headers.get('set-cookie') || '', /ziva_access=;.*Max-Age=0/);
+});
+
 test('session endpoint reports missing Supabase configuration distinctly from an unauthenticated visitor', async (t) => {
   const harness = await createHarness({ supabaseUnavailable: true });
   t.after(() => harness.close());
@@ -411,6 +476,80 @@ test('logout revokes the Supabase session and clears cookies', async (t) => {
   const response = await postAuth(harness, '/api/auth/logout', {}, csrf.token, cookies);
   assert.equal(response.status, 200);
   assert.equal(harness.state.signOutScope, 'global');
+  assert.equal(harness.state.signOutCalls.length, 1);
+  assert.match(response.headers.get('set-cookie'), /ziva_access=; Path=\/; Max-Age=0/);
+  assert.match(response.headers.get('set-cookie'), /ziva_refresh=; Path=\/; Max-Age=0/);
+});
+
+test('logout refreshes an expired access cookie before global sign-out and clears both cookies', async (t) => {
+  const harness = await createHarness();
+  t.after(() => harness.close());
+  const csrf = await csrfFor(harness);
+  await register(harness, csrf);
+  const verification = await verifySignup(harness, csrf, 'person@example.com');
+  const originalCookies = cookieMap(verification);
+
+  const response = await postAuth(
+    harness,
+    '/api/auth/logout',
+    {},
+    csrf.token,
+    { ...csrf.cookies, ...originalCookies, ziva_access: 'expired-access-token' }
+  );
+  assert.equal(response.status, 200);
+  assert.equal(harness.state.refreshCalls, 1);
+  assert.ok(harness.state.sessionSet.access_token);
+  assert.ok(harness.state.sessionSet.refresh_token);
+  assert.notEqual(harness.state.sessionSet.access_token, 'expired-access-token');
+  assert.notEqual(harness.state.sessionSet.refresh_token, originalCookies.ziva_refresh);
+  assert.equal(harness.state.signOutScope, 'global');
+  assert.equal(harness.state.signOutCalls.length, 1);
+  assert.match(response.headers.get('set-cookie'), /ziva_access=; Path=\/; Max-Age=0/);
+  assert.match(response.headers.get('set-cookie'), /ziva_refresh=; Path=\/; Max-Age=0/);
+});
+
+test('logout reports an unavailable Auth service instead of claiming remote revocation', async (t) => {
+  const harness = await createHarness();
+  t.after(() => harness.close());
+  const csrf = await csrfFor(harness);
+  await register(harness, csrf);
+  const verification = await verifySignup(harness, csrf, 'person@example.com');
+  harness.state.getUserError = { status: 503 };
+
+  const response = await postAuth(
+    harness,
+    '/api/auth/logout',
+    {},
+    csrf.token,
+    { ...csrf.cookies, ...cookieMap(verification) }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, 'LOGOUT_UNCONFIRMED');
+  assert.match(response.headers.get('set-cookie'), /ziva_refresh=; Path=\/; Max-Age=0/);
+  assert.equal(harness.state.signOutScope, null);
+});
+
+test('logout does not claim remote sign-out when refreshing the session fails', async (t) => {
+  const harness = await createHarness();
+  t.after(() => harness.close());
+  const csrf = await csrfFor(harness);
+  await register(harness, csrf);
+  const verification = await verifySignup(harness, csrf, 'person@example.com');
+  const cookies = cookieMap(verification);
+  harness.state.refreshError = { status: 503 };
+
+  const response = await postAuth(
+    harness,
+    '/api/auth/logout',
+    {},
+    csrf.token,
+    { ...csrf.cookies, ...cookies, ziva_access: 'expired-access-token' }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, 'LOGOUT_UNCONFIRMED');
+  assert.equal(harness.state.refreshCalls, 1);
+  assert.equal(harness.state.signOutCalls.length, 0);
+  assert.match(response.headers.get('set-cookie'), /ziva_access=; Path=\/; Max-Age=0/);
   assert.match(response.headers.get('set-cookie'), /ziva_refresh=; Path=\/; Max-Age=0/);
 });
 

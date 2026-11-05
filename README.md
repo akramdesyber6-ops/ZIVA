@@ -34,7 +34,7 @@ Keep these values in a local `.env` file and never expose them in browser code, 
 
 `SUPABASE_URL` and either `SUPABASE_ANON_KEY` or `SUPABASE_PUBLISHABLE_KEY` are required for authentication. `APP_ORIGIN` should be set to the exact public origin in production; local development can derive its origin from the incoming request. `TMDB_API_READ_ACCESS_TOKEN` enables the live catalogue. `SUPABASE_SERVICE_ROLE_KEY` is optional and is not used by the current authentication flow; if configured for future trusted server-side work, keep it server-only.
 
-The server-side auth layer uses the existing `lib/supabase.js` integration. Supabase access and refresh tokens remain in server-set `HttpOnly`, `SameSite=Lax` cookies; they are never returned to frontend JavaScript or put in local storage. Production cookies are `Secure`. Auth POST requests validate both same-origin requests and a CSRF token obtained from `GET /api/auth/session`.
+The server-side auth layer uses the existing `lib/supabase.js` integration. Supabase access and refresh tokens remain in server-set `HttpOnly` cookies; they are never returned to frontend JavaScript or put in local storage. Web-only deployments use `SameSite=Lax`; configuring `MOBILE_APP_ORIGINS` enables `SameSite=None; Secure` cookies for cross-origin WebView requests (and currently applies that cookie policy across the deployment). Production cookies are `Secure`. Auth POST requests validate both the trusted Origin and a CSRF token obtained from `GET /api/auth/session`.
 
 The existing schema is defined in `supabase/migrations/001_initial_auth_schema.sql`. It creates:
 
@@ -43,6 +43,24 @@ The existing schema is defined in `supabase/migrations/001_initial_auth_schema.s
 - a `public.handle_new_user()` trigger that creates a profile and assigns the default `user` role when a Supabase Auth user signs up
 - row-level security policies for user profile access and admin-only role management
 - `public.is_user_admin()` for secure permission checks
+
+## Production API and session configuration
+
+The application reads these environment variable names; keep values in the server environment and do not commit them:
+
+- `PORT` — Node server port.
+- `APP_ORIGIN` — exact trusted production web origin, including scheme and port if non-default.
+- `MOBILE_APP_ORIGINS` — comma-separated Capacitor WebView origins explicitly allowed for credentialed CORS and CSRF.
+- `ZIVA_API_BASE_URL` — deployed HTTPS API origin used only when preparing the native web bundle; it must not include a path, query, or fragment.
+- `SUPABASE_URL` and `SUPABASE_ANON_KEY` or `SUPABASE_PUBLISHABLE_KEY` — server-side Supabase Auth configuration.
+- `SUPABASE_SERVICE_ROLE_KEY` — server-only and not required by the normal authentication flow; never include it in web or native assets.
+- `TMDB_API_READ_ACCESS_TOKEN` — server-side metadata proxy credential.
+
+Use the real, operator-configured service origin; the repository intentionally does not choose a production hostname. Production must set `APP_ORIGIN` and `ZIVA_API_BASE_URL` explicitly, and `ZIVA_API_BASE_URL` must be HTTPS. `MOBILE_APP_ORIGINS` is an explicit allowlist, not a wildcard. Keep it limited to the exact origins from the packaged Capacitor app. The API client applies a 15-second timeout to `/api/*` requests and reports network failures without exposing credentials. Offline state does not erase the HttpOnly cookies; retry session restoration after connectivity returns.
+
+The browser session uses server-set HttpOnly access and refresh cookies. Authenticated requests are verified with Supabase Auth; a missing or expired access cookie can be renewed using the refresh cookie. Temporary Auth/network failures return an unavailable response instead of clearing a session as if it were expired. Mutating requests additionally require a matching CSRF cookie/header and a trusted Origin. Supabase's refresh-token reuse interval defaults to 10 seconds, and Supabase does not recommend changing it. The interval allows legitimate retries during token rotation; Supabase also permits reuse of the active token's parent to account for unreliable networks. Multi-instance deployments should handle concurrent refreshes safely in the application/runtime rather than relying on a longer reuse interval.
+
+Native WebViews send credentialed cross-origin requests to `ZIVA_API_BASE_URL`, so configure `MOBILE_APP_ORIGINS` and HTTPS on the API. This uses the same server cookies and Supabase account as the web app, not a second native auth store. Cookie persistence and third-party-cookie behavior differ between Android System WebView and iOS WKWebView and cannot be established by the repository's mock tests. Verify initial login, relaunch, token renewal, logout, offline/reconnection, and protected-page restoration on physical devices before release. Never move access or refresh tokens into URLs, logs, local storage, or the packaged web bundle.
 
 Authentication uses Supabase email/password accounts, with email verification during registration. `POST /api/auth/register` creates the account and requests a signup verification code; `POST /api/auth/verify` verifies the single-use code and establishes the cookie session. `POST /api/auth/login` signs in with an email and password. Sign-in by one-time email code remains available through `POST /api/auth/login-code`, with `POST /api/auth/verify` completing it. Code expiry and rate limits are governed by Supabase Auth. `POST /api/auth/resend` requests another signup verification code. Other routes are:
 
@@ -113,6 +131,18 @@ The existing `001_initial_auth_schema.sql` remains unchanged. Apply migrations i
 3. `supabase/migrations/003_catalogue_and_entitlements.sql` — curated metadata, rights/provider asset references, subscription records and payment-history records.
 
 Do not run these automatically against production. The user-facing app cannot grant itself admin rights or create billing records. Each user's library, subscription and payment history is scoped by `auth.uid()`; administrative access is verified on every server route. Migration 003 stores provider asset identifiers and a rights-evidence reference, not stream URLs.
+
+### Read-only readiness review
+
+All three migration files are present. No migration was executed as part of this authentication/session work, and the live Supabase schema has not been queried; its correspondence with these files is unknown.
+
+| Migration | Changes and dependencies | Readiness notes |
+|---|---|---|
+| `001_initial_auth_schema.sql` | Enables `pgcrypto`; creates profiles, roles, and user-role tables; adds the new-user trigger, admin-check function, and RLS policies. It is the prerequisite for the other migrations. | Verify `pgcrypto`, existing table columns/constraints, trigger/function definitions, grants, and policy names before applying. Its `CREATE POLICY` statements are not preceded by drops, so pre-existing policies with those names can conflict on rerun. `CREATE TABLE IF NOT EXISTS` does not reconcile an existing table with a different shape. |
+| `002_user_library.sql` | Creates private user library and watch-history tables, indexes, grants, and per-user RLS. Depends on `public.profiles` from 001. | Check for existing table shapes, primary keys, constraints, indexes, and same-named policies. Existing tables are not altered to add missing columns or constraints. |
+| `003_catalogue_and_entitlements.sql` | Creates catalogue entries, authorized video-source references, subscriptions, and payment records, with indexes, grants, and RLS. Depends on profiles and `public.is_user_admin()` from 001. | Check for existing table shapes, indexes, policy names, and required UUID support. Provider/payment records are schema only; they do not enable playback or payment processing. |
+
+Recommended order is 001, then 002 and 003 (the latter two both depend on 001 and do not depend on one another). Before any future application, use read-only schema inspection to compare relevant `pg_tables`/`information_schema` columns and constraints, `pg_policies`, indexes, grants, functions, trigger definitions, and the `pgcrypto` extension against each migration. Resolve conflicts and obtain explicit database approval before any migration run. These checks have not been performed against a live project.
 
 ## Anime, payments and playback limitations
 

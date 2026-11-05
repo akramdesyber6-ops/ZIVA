@@ -489,12 +489,22 @@ async function restoreAuthSession() {
     });
     const payload = await response.json().catch(() => ({}));
     if (payload.csrfToken) csrfToken = payload.csrfToken;
-    updateAuthUi(response.ok && payload.authenticated ? payload.user : null);
-    if (response.ok && payload.authenticated) {
+    if (response.ok && payload.authenticated === true && payload.user) {
+      updateAuthUi(payload.user);
       syncLocalWatchlist().catch(() => showToast('Some items are still only saved on this device.'));
+      return;
     }
+    if ((response.ok && payload.authenticated === false) || response.status === 401 || response.status === 403) {
+      updateAuthUi(null);
+      return;
+    }
+    if (response.status === 429 || response.status >= 500) {
+      showToast('The account service is temporarily unavailable. Your sign-in status has not been changed. Please try again shortly.');
+      return;
+    }
+    showToast('ZIVA could not confirm your session. Your sign-in status has not been changed.');
   } catch {
-    updateAuthUi(null);
+    showToast('ZIVA could not verify your session. Check your connection. Your sign-in status has not been changed.');
   }
 }
 
