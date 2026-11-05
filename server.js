@@ -1102,7 +1102,10 @@ function createServer(options = {}) {
 if (require.main === module) {
   const server = createServer();
   const port = Number(process.env.PORT || 5500);
-  server.listen(port, '127.0.0.1', () => console.log(`ZIVA running at http://127.0.0.1:${port} (${process.env.TMDB_API_READ_ACCESS_TOKEN ? 'TMDB live mode configured' : 'demo mode'})`));
+
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`ZIVA running at http://0.0.0.0:${port} (${process.env.TMDB_API_READ_ACCESS_TOKEN ? 'TMDB live mode configured' : 'demo mode'})`);
+  });
 }
 
 module.exports = { createServer };
