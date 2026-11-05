@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#121213">
+    <meta name="description" content="Discover trending and popular anime on ZIVA.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Anime · ZIVA</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/assets/icons/ziva.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="anime-page">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="ZIVA home">ZI<span>VA</span></a>
+      <nav class="nav" aria-label="Main navigation">
+        <a href="/">Home</a>
+        <a href="/movies">Movies</a>
+        <a href="/series">Series</a>
+        <a class="active" href="/anime" aria-current="page">Anime</a>
+        <a href="/watchlist">My List</a>
+      </nav>
+      <div class="top-actions">
+        <a class="sign-in" href="/?auth=login">Sign in</a>
+        <button class="menu-button" id="anime-menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+      </div>
+    </header>
+    <main>
+      <section class="anime-hero">
+        <p class="section-kicker">ANILIST CATALOGUE</p>
+        <h1>Stories beyond <span>imagination.</span></h1>
+        <p>Discover anime with independent metadata from AniList. ZIVA does not host or link to unverified episode streams.</p>
+      </section>
+      <section class="content-section anime-content" aria-labelledby="anime-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">EXPLORE THE ANIME WORLD</p>
+            <h2 id="anime-heading">Anime discovery</h2>
+            <p class="section-subtitle">Ratings and episode counts are supplied by AniList when available.</p>
+          </div>
+        </div>
+        <div class="anime-controls">
+          <label class="anime-search">Search anime
+            <input id="anime-search" type="search" maxlength="100" placeholder="Search titles…" autocomplete="off">
+          </label>
+          <label>Genre
+            <select id="anime-genre">
+              <option value="">All genres</option>
+              <option>Action</option><option>Adventure</option><option>Comedy</option><option>Drama</option>
+              <option>Fantasy</option><option>Horror</option><option>Music</option><option>Mystery</option>
+              <option>Romance</option><option>Sci-Fi</option><option>Slice of Life</option><option>Sports</option>
+              <option>Supernatural</option><option>Thriller</option>
+            </select>
+          </label>
+          <label>Sort
+            <select id="anime-sort"><option value="trending">Trending</option><option value="popular">Popular</option></select>
+          </label>
+        </div>
+        <p class="catalogue-status" id="anime-status" role="status" aria-live="polite">Loading anime…</p>
+        <div class="movie-grid anime-grid" id="anime-grid" aria-live="polite"></div>
+        <div class="anime-more"><button class="ghost-button" id="anime-more" type="button" hidden>Load more</button></div>
+      </section>
+      <section class="promo anime-note">
+        <div class="promo-mark">ZI<span>VA</span></div>
+        <div><p class="section-kicker">PLAYBACK RIGHTS MATTER</p><h2>Metadata is not a video license.</h2><p>Episodes and playback options are shown only when an authorised provider integration is configured.</p></div>
+      </section>
+    </main>
+    <footer class="footer"><a class="brand" href="/">ZI<span>VA</span></a><p>LIGHT UP YOUR SCREEN</p><small>Anime metadata provided by AniList. <a href="https://anilist.co" target="_blank" rel="noopener noreferrer">Visit AniList</a></small></footer>
+    <dialog class="movie-dialog anime-dialog" id="anime-dialog" aria-labelledby="anime-detail-title">
+      <button class="dialog-close" id="anime-dialog-close" type="button" aria-label="Close anime details">×</button>
+      <div class="dialog-art" id="anime-detail-art"></div>
+      <div class="dialog-content">
+        <p class="section-kicker">ANILIST ANIME</p>
+        <h2 id="anime-detail-title"></h2>
+        <div class="dialog-meta" id="anime-detail-meta"></div>
+        <p id="anime-detail-description"></p>
+        <div class="anime-genres" id="anime-detail-genres"></div>
+        <button class="ghost-button" id="anime-favorite" type="button">♡ Add to favourites</button>
+        <p class="provider-info">Episode availability and sub/dub options are not supplied by the metadata service. No playback provider is connected.</p>
+      </div>
+    </dialog>
+    <script src="/mobile-config.js" defer></script>
+    <script src="/src/api-client.js" defer></script>
+    <script src="/src/register-service-worker.js" defer></script>
+    <script src="/src/library-client.js" defer></script>
+    <script src="/anime.js" defer></script>
+  </body>
+</html>

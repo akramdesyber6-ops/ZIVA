@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ZIVA</string>
+    <string name="title_activity_main">ZIVA</string>
+    <string name="package_name">com.ziva.platform</string>
+    <string name="custom_url_scheme">com.ziva.platform</string>
+</resources>

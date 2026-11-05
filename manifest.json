@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "ZIVA — Light Up Your Screen",
+  "short_name": "ZIVA",
+  "description": "Discover movies, series and anime with ZIVA.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#121213",
+  "theme_color": "#FF5F1F",
+  "icons": [
+    {
+      "src": "/assets/icons/ziva.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

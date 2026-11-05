@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#FF5F1F">
   <meta name="description" content="ZIVA — Light Up Your Screen. Discover movies and series and build your watchlist.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>ZIVA — Light Up Your Screen</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/assets/icons/ziva.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -15,13 +19,14 @@
   <header class="topbar">
     <a class="brand" href="#" aria-label="ZIVA home">ZI<span>VA</span></a>
     <nav class="nav" id="navigation" aria-label="Main navigation">
-      <a href="/">Home</a><a href="/movies">Movies</a><a href="/series">Series</a>
+      <a href="/">Home</a><a href="/movies">Movies</a><a href="/series">Series</a><a href="/anime">Anime</a>
       <details class="nav-dropdown"><summary>Genres</summary><div class="genre-menu">
         <a href="/genres/action">Action</a><a href="/genres/comedy">Comedy</a><a href="/genres/family">Family</a><a href="/genres/adventure">Adventure</a><a href="/genres/animation">Animation</a><a href="/genres/drama">Drama</a><a href="/genres/horror">Horror</a><a href="/genres/romance">Romance</a><a href="/genres/sci-fi">Sci-Fi</a><a href="/genres/thriller">Thriller</a><a href="/genres/documentary">Documentary</a>
       </div></details>
       <a href="/watchlist">My Watchlist <span id="watchlist-count" class="count">0</span></a>
+      <a href="/account">My Account</a><a href="/plans">Plans</a>
     </nav>
-    <div class="top-actions"><button class="icon-button" id="search-toggle" aria-label="Open search">⌕</button><button class="sign-in" id="sign-in">Sign in</button><button class="sign-out" id="sign-out" type="button" hidden>Sign out</button><button class="menu-button" id="menu-toggle" aria-label="Toggle navigation">☰</button></div>
+    <div class="top-actions"><button class="icon-button" id="search-toggle" aria-label="Open search">⌕</button><button class="sign-in" id="sign-in">Sign in</button><button class="sign-out" id="sign-out" type="button" hidden>Sign out</button><button class="menu-button" id="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button></div>
   </header>
   <section class="search-strip" id="search-strip"><label class="search-box"><span>⌕</span><input id="search-input" type="search" placeholder="Search movies, shows or genres..." autocomplete="off"><kbd>ESC</kbd></label></section>
   <main>
@@ -93,10 +98,14 @@
     <p class="profile-email" id="profile-email"></p>
     <button class="primary-button profile-logout" id="profile-logout" type="button">Sign out</button>
   </dialog>
-  <dialog class="movie-dialog" id="movie-dialog" aria-labelledby="dialog-title"><button class="dialog-close" id="dialog-close" aria-label="Close details">×</button><div class="dialog-art" id="dialog-art"></div><div class="dialog-content"><p class="section-kicker" id="dialog-genre">MOVIE</p><h2 id="dialog-title">Movie title</h2><div class="dialog-meta" id="dialog-meta"></div><p id="dialog-description"></p><div class="dialog-actions"><button class="ghost-button" id="dialog-save">＋ Add to my list</button><button class="ghost-button" id="dialog-share" type="button">Share title</button><a class="ghost-button" id="dialog-trailer" target="_blank" rel="noopener noreferrer" hidden>Watch official trailer ↗</a></div><section class="player-panel" id="player-panel" aria-label="Movie playback"><div class="video-frame" id="video-frame" hidden><video id="movie-player" controls playsinline preload="metadata"></video></div><p class="provider-info" id="playback-status" role="status">Playback availability is checked when you choose Play.</p><div class="playback-actions"><button class="primary-button" id="dialog-play" type="button">Play title</button><a class="ghost-button" id="dialog-download" hidden download>Download</a></div></section><div class="provider-info" id="dialog-providers" aria-live="polite">Checking official streaming availability…</div></div></dialog>
+  <dialog class="movie-dialog" id="movie-dialog" aria-labelledby="dialog-title"><button class="dialog-close" id="dialog-close" aria-label="Close details">×</button><div class="dialog-art" id="dialog-art"></div><div class="dialog-content"><p class="section-kicker" id="dialog-genre">MOVIE</p><h2 id="dialog-title">Movie title</h2><div class="dialog-meta" id="dialog-meta"></div><p id="dialog-description"></p><div class="dialog-actions"><button class="ghost-button" id="dialog-save" type="button">＋ Add to my list</button><button class="ghost-button" id="dialog-favorite" type="button">♡ Add to favourites</button><button class="ghost-button" id="dialog-share" type="button">Share title</button><a class="ghost-button" id="dialog-trailer" target="_blank" rel="noopener noreferrer" hidden>Watch official trailer ↗</a></div><section class="player-panel" id="player-panel" aria-label="Movie playback"><div class="video-frame" id="video-frame" hidden><video id="movie-player" controls playsinline preload="metadata"></video></div><p class="provider-info" id="playback-status" role="status">Playback availability is checked when you choose Play.</p><div class="playback-actions"><button class="primary-button" id="dialog-play" type="button">Play title</button><a class="ghost-button" id="dialog-download" hidden download>Download</a></div></section><div class="provider-info" id="dialog-providers" aria-live="polite">Checking official streaming availability…</div></div></dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="src/catalogue.js" defer></script>
   <script src="src/catalogue-sections.js" defer></script>
+  <script src="/src/register-service-worker.js" defer></script>
+  <script src="/mobile-config.js" defer></script>
+  <script src="src/api-client.js" defer></script>
+  <script src="src/library-client.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js" defer></script>
   <script src="app.js" defer></script>
 </body>

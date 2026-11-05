@@ -50,11 +50,15 @@ Authentication uses Supabase email/password accounts, with email verification du
 - `GET /api/auth/session`
 - `POST /api/auth/logout`
 - `GET /api/admin/permissions`
+- `GET /api/admin/users`, `/api/admin/catalog`, `/api/admin/video-sources`, `/api/admin/subscriptions`, `/api/admin/payments`; writes are administrator-gated and CSRF-protected
+- `GET /api/anime` for validated AniList metadata
+- `GET|POST /api/library`, `POST /api/watch-history`, and `GET|POST /api/profile`
+- `GET /api/billing` for the authenticated user's subscription and payment history
 - `GET /api/playback/authorize`
 
 The frontend displays live TMDB metadata in this order: Trending Movies, New Releases, Popular Movies, Top Rated Movies, Action, Comedy, Horror, Romance, Adventure, Animation, Documentaries, other TMDB genres, then Trending Series. Sections have pagination, loading placeholders, and error/empty states. Search, detail metadata, shareable movie links, official trailer links, and TMDB regional watch-provider listings use TMDB endpoints. Duplicate titles are suppressed across sections where possible.
 
-ZIVA does not currently have a licensed playback/download provider integration. Movie details show streaming availability from TMDB where provided, otherwise state that the title is unavailable in the selected region. The playback authorization endpoint fails closed rather than authorizing access based only on sign-in. There are no download endpoints or invented playback links. The existing watchlist remains in browser local storage and is not synchronized between devices.
+ZIVA does not currently have a licensed playback/download provider integration. Movie details show regional streaming availability from TMDB where provided; this availability is not a ZIVA playback entitlement. The playback authorization endpoint fails closed rather than authorizing access based only on sign-in. There are no download endpoints or invented playback links. Guests can keep a device-local list; signed-in users can synchronize their list, favourites, profile, and authorized-playback history with Supabase.
 
 The admin permission route verifies the authenticated user's confirmed-email session and calls `is_user_admin()` in that user's Supabase context on each request. Public registration cannot grant admin roles.
 
@@ -92,9 +96,64 @@ This assigns the first administrator role only from a trusted database-admin con
 - TMDB movie and series cards with live genre, year, rating, and poster metadata.
 - Live search, ordered genre sections, and per-section pagination.
 - Movie details, shareable links, official trailers, and regional streaming availability.
-- Personal watchlist saved in browser local storage.
+- Separate AniList-powered anime catalogue and search; anime metadata never implies a playable source.
+- Guest watchlist plus Supabase-synchronized user lists, favourites, profile and playback progress.
+- Secure server-side user and admin endpoints, with migration-backed row-level security.
+- Installable PWA with an offline shell and a bounded cache of public catalogue responses only.
+- Capacitor Android source project with HTTPS API-origin configuration.
 - Keyboard support, semantic controls and reduced-motion preference.
-- No framework or frontend build step.
+- No framework migration or frontend bundler required.
+
+## Database migrations
+
+The existing `001_initial_auth_schema.sql` remains unchanged. Apply migrations in order, from a trusted Supabase SQL editor or migration runner, after reviewing each file:
+
+1. `supabase/migrations/001_initial_auth_schema.sql` — existing authentication, profiles and roles.
+2. `supabase/migrations/002_user_library.sql` — private watchlists, favourites and viewing history.
+3. `supabase/migrations/003_catalogue_and_entitlements.sql` — curated metadata, rights/provider asset references, subscription records and payment-history records.
+
+Do not run these automatically against production. The user-facing app cannot grant itself admin rights or create billing records. Each user's library, subscription and payment history is scoped by `auth.uid()`; administrative access is verified on every server route. Migration 003 stores provider asset identifiers and a rights-evidence reference, not stream URLs.
+
+## Anime, payments and playback limitations
+
+Anime discovery uses a server-side AniList GraphQL adapter for metadata. No AniEmbed integration is enabled: its licensing/embedding terms and a reliable provider contract have not been verified. Anime episodes and sub/dub playback are not advertised as available.
+
+The subscription and payment schemas and read-only account/admin views are preparation only. There is no payment provider, checkout, webhook, or real transaction processing. Do not mark a subscription paid or enter fabricated payment history.
+
+The reusable HTML video player and server authorization path accept only a configured authorized playback adapter. No real stream provider is configured, so actual movie, TV, and anime playback, downloads, offline video, third-party subtitles/quality controls, and the permanent video watermark are not available. TMDB and AniList supply metadata, not content rights.
+
+The current admin control center supports user/role review, curated movie/series/anime metadata, rights-reference records, and read-only subscription/payment history. Dedicated season/episode editing, analytics/reports, platform configuration, and a verified payment-provider workflow remain future work; the dashboard does not imply these systems are operational.
+
+## PWA installation
+
+Serve ZIVA over HTTPS (or localhost during development), then use the browser's **Install app** / **Add to Home Screen** action. The service worker precaches the public application shell and may cache up to 50 public TMDB/AniList metadata responses. Authentication, profile, library, history, billing, playback and admin APIs are excluded. The PWA does not make protected video available offline.
+
+## Capacitor Android
+
+Install Node.js 22+, Android Studio/Android SDK and a supported JDK. Copy `.env.example` to a local `.env` or export the values in the build environment. Set `ZIVA_API_BASE_URL` to the real deployed HTTPS ZIVA server origin (no path or credentials); do not substitute an invented production hostname. The web assets contain only this public API origin, never private credentials.
+
+Configure the backend's `MOBILE_APP_ORIGINS` with the native WebView origins (usually `https://localhost,capacitor://localhost`) and `APP_ORIGIN` with the deployed web origin. Native API calls require credentialed CORS, Secure `SameSite=None` cookies, and CSRF validation. HTTPS and a reachable backend are required.
+
+```bash
+npm install
+npm run mobile:prepare
+npm run android:build
+```
+
+`android:build` adds the Capacitor Android platform if it is missing, syncs the web assets, then builds a debug APK at `android/app/build/outputs/apk/debug/app-debug.apk`. The script requires `ZIVA_API_BASE_URL`, Java, and an Android SDK (`ANDROID_HOME` or `ANDROID_SDK_ROOT`). The native application ID is `com.ziva.platform`; change it before publishing if a different reverse-domain ID is required. iOS compilation requires macOS and Xcode.
+
+## Validation
+
+```bash
+npm test
+npm run build
+node --check server.js
+node --check lib/supabase.js
+node --check app.js
+node --check admin/app.js
+```
+
+Tests use local mocks and static checks; they do not prove live Supabase, AniList, TMDB, email, payments, rights, browser rendering, or device builds.
 
 ## Project structure
 

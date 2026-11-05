@@ -1,0 +1,17 @@
+{
+  "appId": "com.ziva.platform",
+  "appName": "ZIVA",
+  "webDir": "mobile/www",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "backgroundColor": "#121213",
+      "showSpinner": false
+    }
+  }
+}
